@@ -139,7 +139,8 @@ function fetch_invoice(PDO $db, int $id): ?array {
         $inv['client_state'] ?? '',
         $inv['client_country'] ?? '',
     ], fn($x) => $x !== '' && $x !== null));
-    $base = rtrim(env('INVOICEPLANE_BASE_URL', ''), '/');
+    $scheme = $_SERVER['REQUEST_SCHEME'] ?? (($_SERVER['HTTPS'] ?? '') === 'on' ? 'https' : 'http');
+    $base = rtrim(env('INVOICEPLANE_BASE_URL', "$scheme://{$_SERVER['HTTP_HOST']}"), '/');
     return [
         'id'           => (int) $inv['invoice_id'],
         'number'       => $inv['invoice_number'],
