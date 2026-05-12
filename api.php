@@ -117,6 +117,11 @@ function generate_invoice_number(PDO $db, int $group_id, string $date): string {
         '{{{day}}}'   => $dt->format('d'),
         '{{{id}}}'    => $padded,
     ]);
+    $s = $db->prepare('SELECT COUNT(*) FROM ip_invoices WHERE invoice_number = ?');
+    $s->execute([$number]);
+    if ((int) $s->fetchColumn() > 0) {
+        throw new RuntimeException('duplicate invoice number: ' . $number);
+    }
     $s = $db->prepare('UPDATE ip_invoice_groups SET invoice_group_next_id = invoice_group_next_id + 1 WHERE invoice_group_id=?');
     $s->execute([$group_id]);
     return $number;
@@ -367,5 +372,8 @@ try {
     err(404, 'not found');
 } catch (Throwable $e) {
     error_log('InvoicePlaneAPI error: ' . $e->getMessage());
+    if (str_starts_with($e->getMessage(), 'duplicate invoice number')) {
+        err(409, $e->getMessage());
+    }
     err(500, 'internal error');
 }
