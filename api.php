@@ -432,15 +432,12 @@ try {
                     err(400, 'item_id is required for each item');
                 }
                 $iid = (int) $i['item_id'];
-                $s = $db->prepare('SELECT item_id FROM ip_invoice_items WHERE item_id=? AND invoice_id=?');
+                $s = $db->prepare('SELECT item_id, item_quantity, item_price FROM ip_invoice_items WHERE item_id=? AND invoice_id=?');
                 $s->execute([$iid, $id]);
-                if (!$s->fetch()) err(400, 'item_id does not belong to this invoice');
-
-                $s = $db->prepare('SELECT item_quantity, item_price FROM ip_invoice_items WHERE item_id=?');
-                $s->execute([$iid]);
                 $db_row = $s->fetch();
+                if (!$db_row) err(400, 'item_id does not belong to this invoice');
 
-                    validate_item_fields($i, $db, $db_row);
+                validate_item_fields($i, $db, $db_row);
 
                 $iup = []; $iargs = [];
                 foreach ($cols as $k => $col) {
@@ -489,14 +486,17 @@ try {
             $overrides = [];
             foreach ($body['items'] ?? [] as $i) {
                 if (isset($i['item_id'])) {
-                    $db_row = $orig_by_id[(int) $i['item_id']] ?? null;
-                validate_item_fields($i, $db, $db_row);
-                    $overrides[(int) $i['item_id']] = $i;
+                    $iid = (int) $i['item_id'];
+                    if (!isset($orig_by_id[$iid])) {
+                        err(400, 'item_id does not belong to this invoice');
+                    }
+                    validate_item_fields($i, $db, $orig_by_id[$iid]);
+                    $overrides[$iid] = $i;
                 }
             }
+            $ins = $db->prepare('INSERT INTO ip_invoice_items (invoice_id, item_tax_rate_id, item_product_id, item_task_id, item_date_added, item_name, item_description, item_quantity, item_price, item_discount_amount, item_order, item_product_unit, item_product_unit_id, item_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
             foreach ($orig_items as $it) {
                 $ov = $overrides[(int) $it['item_id']] ?? [];
-                $ins = $db->prepare('INSERT INTO ip_invoice_items (invoice_id, item_tax_rate_id, item_product_id, item_task_id, item_date_added, item_name, item_description, item_quantity, item_price, item_discount_amount, item_order, item_product_unit, item_product_unit_id, item_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
                 $ins->execute([
                     $new_id,
                     isset($ov['tax_rate_id']) ? $ov['tax_rate_id'] : ($it['item_tax_rate_id'] ?? 0),
