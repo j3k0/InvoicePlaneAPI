@@ -69,6 +69,39 @@ function tax_rate(PDO $db, ?int $rate_id): float {
     }
 }
 
+function validate_dates(array $body, ?PDO $db = null, ?int $invoice_id = null): void {
+    $date = $body['date'] ?? null;
+    $due_date = $body['due_date'] ?? null;
+
+    $validate_date_field = function (?string $d, string $label): string {
+        if ($d === null) return '';
+        $dt = DateTimeImmutable::createFromFormat('Y-m-d', $d);
+        if (!$dt || $dt->format('Y-m-d') !== $d || $dt->format('Y') === '0000') {
+            err(400, "$label must be a valid date in Y-m-d format");
+        }
+        return $d;
+    };
+
+    $date = $validate_date_field($date, 'date') ?: null;
+    $due_date = $validate_date_field($due_date, 'due_date') ?: null;
+
+    if ($due_date !== null || $date !== null) {
+        if ($db !== null && $invoice_id !== null) {
+            if ($date === null || $due_date === null) {
+                $s = $db->prepare('SELECT invoice_date_created, invoice_date_due FROM ip_invoices WHERE invoice_id = ?');
+                $s->execute([$invoice_id]);
+                $row = $s->fetch();
+                if (!$row) err(404, 'invoice not found');
+                if ($date === null) $date = $row['invoice_date_created'];
+                if ($due_date === null) $due_date = $row['invoice_date_due'];
+            }
+        }
+        if ($date !== null && $due_date !== null && $due_date < $date) {
+            err(400, 'due_date must be on or after date');
+        }
+    }
+}
+
 function recompute_item(PDO $db, int $item_id): void {
     $s = $db->prepare('SELECT item_quantity, item_price, item_discount_amount, item_tax_rate_id FROM ip_invoice_items WHERE item_id = ?');
     $s->execute([$item_id]);
