@@ -108,7 +108,7 @@ function validate_items_array($items): void {
     }
 }
 
-function validate_item_fields(array $item, ?PDO $db = null, ?int $invoice_id = null, ?array $db_row = null): void {
+function validate_item_fields(array $item, ?PDO $db = null, ?array $db_row = null): void {
     $numeric_fields = [
         'quantity'         => ['max' => 999999],
         'price'            => ['max' => 999999999],
@@ -440,7 +440,7 @@ try {
                 $s->execute([$iid]);
                 $db_row = $s->fetch();
 
-                validate_item_fields($i, $db, $id, $db_row);
+                    validate_item_fields($i, $db, $db_row);
 
                 $iup = []; $iargs = [];
                 foreach ($cols as $k => $col) {
@@ -490,7 +490,7 @@ try {
             foreach ($body['items'] ?? [] as $i) {
                 if (isset($i['item_id'])) {
                     $db_row = $orig_by_id[(int) $i['item_id']] ?? null;
-                    validate_item_fields($i, $db, $id, $db_row);
+                validate_item_fields($i, $db, $db_row);
                     $overrides[(int) $i['item_id']] = $i;
                 }
             }
@@ -511,7 +511,7 @@ try {
                     isset($ov['order']) ? $ov['order'] : $it['item_order'],
                     isset($ov['unit']) ? $ov['unit'] : $it['item_product_unit'],
                     $it['item_product_unit_id'],
-                    $it['item_date'],
+                    isset($ov['item_date']) ? $ov['item_date'] : $it['item_date'],
                 ]);
                 recompute_item($db, (int) $db->lastInsertId());
             }
