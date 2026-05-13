@@ -141,7 +141,7 @@ function validate_item_fields(array $item, ?PDO $db = null, ?int $invoice_id = n
         $qty = (float) ($item['quantity'] ?? ($db_row['item_quantity'] ?? 0));
         $price = (float) ($item['price'] ?? ($db_row['item_price'] ?? 0));
         $disc = (float) $item['discount_amount'];
-        if ($disc > 0 && $qty > 0 && $price > 0 && $disc > $qty * $price) {
+        if ($disc > $qty * $price) {
             err(400, 'discount_amount must not exceed quantity * price');
         }
     }
@@ -478,17 +478,23 @@ try {
             $s->execute([$orig['user_id'], $orig['client_id'], $orig['invoice_group_id'], $date, $due_date, $number, $orig['invoice_terms'] ?? '', $url_key, $orig['payment_method'] ?? 0]);
             $new_id = (int) $db->lastInsertId();
 
+            $items = $db->prepare('SELECT * FROM ip_invoice_items WHERE invoice_id=? ORDER BY item_order, item_id');
+            $items->execute([$id]);
+            $orig_items = $items->fetchAll();
+            $orig_by_id = [];
+            foreach ($orig_items as $oi) {
+                $orig_by_id[(int) $oi['item_id']] = $oi;
+            }
+
             $overrides = [];
             foreach ($body['items'] ?? [] as $i) {
                 if (isset($i['item_id'])) {
-                    validate_item_fields($i, $db, $id);
+                    $db_row = $orig_by_id[(int) $i['item_id']] ?? null;
+                    validate_item_fields($i, $db, $id, $db_row);
                     $overrides[(int) $i['item_id']] = $i;
                 }
             }
-
-            $items = $db->prepare('SELECT * FROM ip_invoice_items WHERE invoice_id=? ORDER BY item_order, item_id');
-            $items->execute([$id]);
-            foreach ($items->fetchAll() as $it) {
+            foreach ($orig_items as $it) {
                 $ov = $overrides[(int) $it['item_id']] ?? [];
                 $ins = $db->prepare('INSERT INTO ip_invoice_items (invoice_id, item_tax_rate_id, item_product_id, item_task_id, item_date_added, item_name, item_description, item_quantity, item_price, item_discount_amount, item_order, item_product_unit, item_product_unit_id, item_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
                 $ins->execute([
