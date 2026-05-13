@@ -408,11 +408,14 @@ try {
 
         if (count($parts) === 3 && $method === 'PATCH') {
             $body = body_json();
+            validate_items_array($body['items'] ?? null);
             $s = $db->prepare('SELECT invoice_status_id FROM ip_invoices WHERE invoice_id=?');
             $s->execute([$id]);
             $row = $s->fetch();
             if (!$row) err(404, 'invoice not found');
             if ((int) $row['invoice_status_id'] !== 1) err(409, 'invoice not in draft status');
+
+            validate_dates($body, $db, $id);
 
             $up = []; $args = [];
             if (isset($body['date']))     { $up[] = 'invoice_date_created=?'; $args[] = $body['date']; }
@@ -425,17 +428,30 @@ try {
             }
             $cols = ['quantity' => 'item_quantity', 'price' => 'item_price', 'description' => 'item_description', 'name' => 'item_name', 'unit' => 'item_product_unit', 'order' => 'item_order', 'discount_amount' => 'item_discount_amount', 'tax_rate_id' => 'item_tax_rate_id', 'item_date' => 'item_date'];
             foreach ($body['items'] ?? [] as $i) {
-                if (!isset($i['item_id'])) continue;
+                if (!isset($i['item_id'])) {
+                    err(400, 'item_id is required for each item');
+                }
+                $iid = (int) $i['item_id'];
+                $s = $db->prepare('SELECT item_id FROM ip_invoice_items WHERE item_id=? AND invoice_id=?');
+                $s->execute([$iid, $id]);
+                if (!$s->fetch()) err(400, 'item_id does not belong to this invoice');
+
+                $s = $db->prepare('SELECT item_quantity, item_price FROM ip_invoice_items WHERE item_id=?');
+                $s->execute([$iid]);
+                $db_row = $s->fetch();
+
+                validate_item_fields($i, $db, $id, $db_row);
+
                 $iup = []; $iargs = [];
                 foreach ($cols as $k => $col) {
-                    if (array_key_exists($k, $i)) { $iup[] = "$col=?"; $iargs[] = $i[$k]; }
+                    if (isset($i[$k])) { $iup[] = "$col=?"; $iargs[] = $i[$k]; }
                 }
                 if ($iup) {
-                    $iargs[] = (int) $i['item_id'];
+                    $iargs[] = $iid;
                     $iargs[] = $id;
                     $s = $db->prepare('UPDATE ip_invoice_items SET ' . implode(',', $iup) . ' WHERE item_id=? AND invoice_id=?');
                     $s->execute($iargs);
-                    recompute_item($db, (int) $i['item_id']);
+                    recompute_item($db, $iid);
                 }
             }
             recompute_invoice($db, $id);
@@ -444,13 +460,14 @@ try {
 
         if (count($parts) === 4 && $parts[3] === 'copy' && $method === 'POST') {
             $body = body_json();
+            validate_items_array($body['items'] ?? null);
+
             $s = $db->prepare('SELECT * FROM ip_invoices WHERE invoice_id=?');
             $s->execute([$id]);
             $orig = $s->fetch();
             if (!$orig) err(404, 'invoice not found');
-            $s = $db->prepare('SELECT * FROM ip_invoice_items WHERE invoice_id=? ORDER BY item_order, item_id');
-            $s->execute([$id]);
-            $items = $s->fetchAll();
+
+            validate_dates($body);
 
             $date     = $body['date']     ?? date('Y-m-d');
             $due_date = $body['due_date'] ?? date('Y-m-d', strtotime("$date +30 days"));
@@ -463,25 +480,30 @@ try {
 
             $overrides = [];
             foreach ($body['items'] ?? [] as $i) {
-                if (isset($i['item_id'])) $overrides[(int) $i['item_id']] = $i;
+                if (isset($i['item_id'])) {
+                    validate_item_fields($i, $db, $id);
+                    $overrides[(int) $i['item_id']] = $i;
+                }
             }
 
-            $ins = $db->prepare('INSERT INTO ip_invoice_items (invoice_id, item_tax_rate_id, item_product_id, item_task_id, item_date_added, item_name, item_description, item_quantity, item_price, item_discount_amount, item_order, item_product_unit, item_product_unit_id, item_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
-            foreach ($items as $it) {
+            $items = $db->prepare('SELECT * FROM ip_invoice_items WHERE invoice_id=? ORDER BY item_order, item_id');
+            $items->execute([$id]);
+            foreach ($items->fetchAll() as $it) {
                 $ov = $overrides[(int) $it['item_id']] ?? [];
+                $ins = $db->prepare('INSERT INTO ip_invoice_items (invoice_id, item_tax_rate_id, item_product_id, item_task_id, item_date_added, item_name, item_description, item_quantity, item_price, item_discount_amount, item_order, item_product_unit, item_product_unit_id, item_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
                 $ins->execute([
                     $new_id,
-                    $ov['tax_rate_id']     ?? $it['item_tax_rate_id'] ?? 0,
+                    isset($ov['tax_rate_id']) ? $ov['tax_rate_id'] : ($it['item_tax_rate_id'] ?? 0),
                     $it['item_product_id'],
                     $it['item_task_id'],
                     $date,
-                    $ov['name']            ?? $it['item_name'],
-                    $ov['description']     ?? $it['item_description'],
-                    $ov['quantity']        ?? $it['item_quantity'],
-                    $ov['price']           ?? $it['item_price'],
-                    $ov['discount_amount'] ?? $it['item_discount_amount'],
-                    $ov['order']           ?? $it['item_order'],
-                    $ov['unit']            ?? $it['item_product_unit'],
+                    isset($ov['name']) ? $ov['name'] : $it['item_name'],
+                    isset($ov['description']) ? $ov['description'] : $it['item_description'],
+                    isset($ov['quantity']) ? $ov['quantity'] : $it['item_quantity'],
+                    isset($ov['price']) ? $ov['price'] : $it['item_price'],
+                    isset($ov['discount_amount']) ? $ov['discount_amount'] : $it['item_discount_amount'],
+                    isset($ov['order']) ? $ov['order'] : $it['item_order'],
+                    isset($ov['unit']) ? $ov['unit'] : $it['item_product_unit'],
                     $it['item_product_unit_id'],
                     $it['item_date'],
                 ]);
