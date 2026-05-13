@@ -102,6 +102,112 @@ function validate_dates(array $body, ?PDO $db = null, ?int $invoice_id = null): 
     }
 }
 
+function validate_items_array($items): void {
+    if ($items !== null && !is_array($items)) {
+        err(400, 'items must be an array');
+    }
+}
+
+function validate_item_fields(array $item, ?PDO $db = null, ?int $invoice_id = null, ?array $db_row = null): void {
+    $numeric_fields = [
+        'quantity'         => ['max' => 999999],
+        'price'            => ['max' => 999999999],
+        'discount_amount'  => ['max' => 999999999],
+    ];
+
+    foreach ($numeric_fields as $field => $opts) {
+        if (!array_key_exists($field, $item)) continue;
+        $v = $item[$field];
+        if (is_bool($v) || $v === null) {
+            err(400, "$field must be a non-negative number");
+        }
+        if (!is_string($v) && !is_int($v) && !is_float($v)) {
+            err(400, "$field must be a non-negative number");
+        }
+        $sv = (string) $v;
+        if (!preg_match('/^\d+(\.\d+)?$/', $sv)) {
+            err(400, "$field must be a non-negative number");
+        }
+        $fv = (float) $v;
+        if ($fv < 0) {
+            err(400, "$field must be a non-negative number");
+        }
+        if ($fv > $opts['max']) {
+            err(400, "$field must not exceed {$opts['max']}");
+        }
+    }
+
+    if (array_key_exists('discount_amount', $item)) {
+        $qty = (float) ($item['quantity'] ?? ($db_row['item_quantity'] ?? 0));
+        $price = (float) ($item['price'] ?? ($db_row['item_price'] ?? 0));
+        $disc = (float) $item['discount_amount'];
+        if ($disc > 0 && $qty > 0 && $price > 0 && $disc > $qty * $price) {
+            err(400, 'discount_amount must not exceed quantity * price');
+        }
+    }
+
+    if (array_key_exists('order', $item)) {
+        $v = $item['order'];
+        if (!is_int($v) && !(is_string($v) && ctype_digit($v))) {
+            err(400, 'order must be an integer between 0 and 999');
+        }
+        if ((int) $v < 0 || (int) $v > 999) {
+            err(400, 'order must be an integer between 0 and 999');
+        }
+    }
+
+    if (array_key_exists('tax_rate_id', $item) && $item['tax_rate_id'] !== null) {
+        $v = $item['tax_rate_id'];
+        if (is_bool($v)) {
+            err(400, 'tax_rate_id must be a positive integer');
+        }
+        if (!is_int($v) && !(is_string($v) && ctype_digit($v))) {
+            err(400, 'tax_rate_id must be a positive integer');
+        }
+        $id = (int) $v;
+        if ($id < 0) {
+            err(400, 'tax_rate_id must be a positive integer');
+        }
+        if ($id > 0) {
+            static $seen = [];
+            if (!isset($seen[$id])) {
+                $s = ($db ?? db())->prepare('SELECT 1 FROM ip_tax_rates WHERE tax_rate_id = ?');
+                $s->execute([$id]);
+                $seen[$id] = (bool) $s->fetch();
+            }
+            if (!$seen[$id]) {
+                err(400, 'invalid tax_rate_id');
+            }
+        }
+    }
+
+    if (array_key_exists('item_date', $item)) {
+        $v = $item['item_date'];
+        if ($v !== null) {
+            $dt = DateTimeImmutable::createFromFormat('Y-m-d', $v);
+            if (!$dt || $dt->format('Y-m-d') !== $v || $dt->format('Y') === '0000') {
+                err(400, 'item_date must be a valid date in Y-m-d format');
+            }
+        }
+    }
+
+    if (array_key_exists('name', $item)) {
+        $v = $item['name'];
+        if (!is_string($v)) err(400, 'name must be a string');
+        if (mb_strlen($v) < 1 || mb_strlen($v) > 255) err(400, 'name must be 1-255 characters');
+    }
+    if (array_key_exists('description', $item)) {
+        $v = $item['description'];
+        if (!is_string($v)) err(400, 'description must be a string');
+        if (mb_strlen($v) > 65535) err(400, 'description must be at most 65535 characters');
+    }
+    if (array_key_exists('unit', $item)) {
+        $v = $item['unit'];
+        if (!is_string($v)) err(400, 'unit must be a string');
+        if (mb_strlen($v) > 50) err(400, 'unit must be at most 50 characters');
+    }
+}
+
 function recompute_item(PDO $db, int $item_id): void {
     $s = $db->prepare('SELECT item_quantity, item_price, item_discount_amount, item_tax_rate_id FROM ip_invoice_items WHERE item_id = ?');
     $s->execute([$item_id]);
