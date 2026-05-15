@@ -24,6 +24,8 @@ Single-file PHP REST API (~379 lines) for InvoicePlane. No framework, no depende
 
 ## Testing
 
+**No task is done until `./tests/test.sh` passes.** If you add or change an API endpoint, add a corresponding test case to `tests/test.sh` and add seed data to `tests/seed.sql` if needed. If you change `api.php` or `docker-compose.test.yml`, run `./tests/test.sh` to verify nothing broke.
+
 ### Quick Start
 
 ```bash
