@@ -1,0 +1,55 @@
+services:
+  mysql:
+    image: mariadb:10
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: invoiceplane_db
+      MYSQL_USER: invoiceplane
+      MYSQL_PASSWORD: password
+    volumes:
+      - ./tests/seed.sql:/docker-entrypoint-initdb.d/01-seed.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 3s
+      timeout: 5s
+      retries: 10
+
+  invoiceplane:
+    image: jeko/invoiceplane:1.7.1-1
+    command: app:invoiceplane
+    environment:
+      INVOICEPLANE_FQDN: localhost
+      INVOICEPLANE_TIMEZONE: UTC
+      INVOICEPLANE_URL: http://localhost:10080
+      DB_HOST: mysql
+      DB_NAME: invoiceplane_db
+      DB_USER: invoiceplane
+      DB_PASS: password
+      INVOICEPLANE_API_KEY: test-api-key
+      INVOICEPLANE_DB_HOST: mysql
+      INVOICEPLANE_DB_NAME: invoiceplane_db
+      INVOICEPLANE_DB_USER: invoiceplane
+      INVOICEPLANE_DB_PASS: password
+    volumes:
+      - ./api.php:/var/www/html/api/index.php:ro
+      - /var/lib/invoiceplane
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  nginx:
+    image: jeko/invoiceplane:1.7.1-1
+    entrypoint: /usr/local/bin/override-entrypoint.sh
+    command: app:nginx
+    environment:
+      INVOICEPLANE_PHP_FPM_HOST: invoiceplane
+      INVOICEPLANE_PHP_FPM_PORT: "9000"
+    ports:
+      - "10080:80"
+    volumes_from:
+      - invoiceplane
+    volumes:
+      - ./tests/nginx-site.conf:/etc/nginx/custom-site.conf:ro
+      - ./tests/nginx-entrypoint.sh:/usr/local/bin/override-entrypoint.sh:ro
+    depends_on:
+      - invoiceplane
