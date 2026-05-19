@@ -453,7 +453,7 @@ All mutation endpoints validate input before writing to the database. Validation
 | Rule | Detail |
 |------|--------|
 | `items` | Must be an array if provided |
-| `item_id` | Required for each item in PATCH; must belong to the target invoice |
+| `item_id` | Required for each item in PATCH; must belong to the target invoice. **Breaking change:** previously items without `item_id` were silently skipped; now they return 400 |
 | Null rejection | Null values for numeric fields are rejected (prevents silent zeroing) |
 
 ### Overflow safety
