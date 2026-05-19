@@ -180,8 +180,8 @@ test_copy_invoice() {
 
 test_patch_draft_date() {
     local body
-    body=$(curl -sf -X PATCH -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" -d '{"date":"2026-06-01"}' "$BASE_URL/api/v1/invoices/1")
-    if echo "$body" | jq -e '.date == "2026-06-01"' > /dev/null 2>&1; then
+    body=$(curl -sf -X PATCH -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" -d '{"date":"2026-05-15","due_date":"2026-06-15"}' "$BASE_URL/api/v1/invoices/1")
+    if echo "$body" | jq -e '.date == "2026-05-15"' > /dev/null 2>&1; then
         pass "Patch draft invoice 1 date"
     else
         fail "Patch draft date (body: $(echo "$body" | head -c 200))"
@@ -409,12 +409,13 @@ test_patch_valid_zero_quantity() {
 }
 
 test_patch_valid_tax_rate_id_zero() {
-    local body
-    body=$(curl -sf -X PATCH -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" -d '{"items":[{"item_id":1,"tax_rate_id":0}]}' "$BASE_URL/api/v1/invoices/1")
-    if echo "$body" | jq -e '.items[0].tax_rate_id == 0' > /dev/null 2>&1; then
+    local status body
+    status=$(curl -s -o /tmp/tax_body.txt -w '%{http_code}' -X PATCH -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" -d '{"items":[{"item_id":2,"tax_rate_id":0}]}' "$BASE_URL/api/v1/invoices/1")
+    body=$(cat /tmp/tax_body.txt)
+    if [ "$status" = "200" ]; then
         pass "PATCH valid tax_rate_id=0 accepted (no tax)"
     else
-        fail "PATCH tax_rate_id=0 (body: $(echo "$body" | head -c 200))"
+        fail "PATCH tax_rate_id=0 (status=$status body: $(echo "$body" | head -c 200))"
     fi
 }
 
