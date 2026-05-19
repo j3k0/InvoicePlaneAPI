@@ -228,6 +228,196 @@ test_patch_non_draft() {
     fi
 }
 
+test_patch_negative_quantity() {
+    local status
+    status=$(curl -s -o /dev/null -w '%{http_code}' -X PATCH -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" -d '{"items":[{"item_id":1,"quantity":-5}]}' "$BASE_URL/api/v1/invoices/1")
+    if [ "$status" = "400" ]; then
+        pass "PATCH negative quantity returns 400"
+    else
+        fail "PATCH negative quantity (expected 400, got $status)"
+    fi
+}
+
+test_patch_negative_price() {
+    local status
+    status=$(curl -s -o /dev/null -w '%{http_code}' -X PATCH -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" -d '{"items":[{"item_id":1,"price":-10}]}' "$BASE_URL/api/v1/invoices/1")
+    if [ "$status" = "400" ]; then
+        pass "PATCH negative price returns 400"
+    else
+        fail "PATCH negative price (expected 400, got $status)"
+    fi
+}
+
+test_patch_scientific_notation() {
+    local status
+    status=$(curl -s -o /dev/null -w '%{http_code}' -X PATCH -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" -d '{"items":[{"item_id":1,"quantity":"1e3"}]}' "$BASE_URL/api/v1/invoices/1")
+    if [ "$status" = "400" ]; then
+        pass "PATCH scientific notation quantity returns 400"
+    else
+        fail "PATCH scientific notation (expected 400, got $status)"
+    fi
+}
+
+test_patch_null_price() {
+    local status
+    status=$(curl -s -o /dev/null -w '%{http_code}' -X PATCH -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" -d '{"items":[{"item_id":1,"price":null}]}' "$BASE_URL/api/v1/invoices/1")
+    if [ "$status" = "400" ]; then
+        pass "PATCH null price returns 400"
+    else
+        fail "PATCH null price (expected 400, got $status)"
+    fi
+}
+
+test_patch_boolean_quantity() {
+    local status
+    status=$(curl -s -o /dev/null -w '%{http_code}' -X PATCH -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" -d '{"items":[{"item_id":1,"quantity":true}]}' "$BASE_URL/api/v1/invoices/1")
+    if [ "$status" = "400" ]; then
+        pass "PATCH boolean quantity returns 400"
+    else
+        fail "PATCH boolean quantity (expected 400, got $status)"
+    fi
+}
+
+test_patch_invalid_tax_rate_id() {
+    local status
+    status=$(curl -s -o /dev/null -w '%{http_code}' -X PATCH -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" -d '{"items":[{"item_id":1,"tax_rate_id":9999}]}' "$BASE_URL/api/v1/invoices/1")
+    if [ "$status" = "400" ]; then
+        pass "PATCH invalid tax_rate_id returns 400"
+    else
+        fail "PATCH invalid tax_rate_id (expected 400, got $status)"
+    fi
+}
+
+test_patch_invalid_date() {
+    local status
+    status=$(curl -s -o /dev/null -w '%{http_code}' -X PATCH -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" -d '{"date":"2026-13-45"}' "$BASE_URL/api/v1/invoices/1")
+    if [ "$status" = "400" ]; then
+        pass "PATCH invalid date returns 400"
+    else
+        fail "PATCH invalid date (expected 400, got $status)"
+    fi
+}
+
+test_patch_due_date_before_date() {
+    local status
+    status=$(curl -s -o /dev/null -w '%{http_code}' -X PATCH -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" -d '{"date":"2026-06-01","due_date":"2026-01-01"}' "$BASE_URL/api/v1/invoices/1")
+    if [ "$status" = "400" ]; then
+        pass "PATCH due_date before date returns 400"
+    else
+        fail "PATCH due_date before date (expected 400, got $status)"
+    fi
+}
+
+test_patch_discount_exceeds_subtotal() {
+    local status
+    status=$(curl -s -o /dev/null -w '%{http_code}' -X PATCH -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" -d '{"items":[{"item_id":1,"discount_amount":999999}]}' "$BASE_URL/api/v1/invoices/1")
+    if [ "$status" = "400" ]; then
+        pass "PATCH discount_amount>qty*price returns 400"
+    else
+        fail "PATCH discount_amount>qty*price (expected 400, got $status)"
+    fi
+}
+
+test_patch_item_without_item_id() {
+    local status
+    status=$(curl -s -o /dev/null -w '%{http_code}' -X PATCH -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" -d '{"items":[{"quantity":5}]}' "$BASE_URL/api/v1/invoices/1")
+    if [ "$status" = "400" ]; then
+        pass "PATCH item without item_id returns 400"
+    else
+        fail "PATCH item without item_id (expected 400, got $status)"
+    fi
+}
+
+test_patch_wrong_item_id() {
+    local status
+    status=$(curl -s -o /dev/null -w '%{http_code}' -X PATCH -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" -d '{"items":[{"item_id":5,"quantity":1}]}' "$BASE_URL/api/v1/invoices/1")
+    if [ "$status" = "400" ]; then
+        pass "PATCH item_id from wrong invoice returns 400"
+    else
+        fail "PATCH item_id from wrong invoice (expected 400, got $status)"
+    fi
+}
+
+test_patch_items_not_array() {
+    local status
+    status=$(curl -s -o /dev/null -w '%{http_code}' -X PATCH -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" -d '{"items":"not-array"}' "$BASE_URL/api/v1/invoices/1")
+    if [ "$status" = "400" ]; then
+        pass "PATCH items not array returns 400"
+    else
+        fail "PATCH items not array (expected 400, got $status)"
+    fi
+}
+
+test_copy_invalid_date() {
+    local status
+    status=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" -d '{"date":"not-a-date"}' "$BASE_URL/api/v1/invoices/2/copy")
+    if [ "$status" = "400" ]; then
+        pass "Copy with invalid date returns 400"
+    else
+        fail "Copy invalid date (expected 400, got $status)"
+    fi
+}
+
+test_copy_due_date_before_date() {
+    local status
+    status=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" -d '{"due_date":"2020-01-01"}' "$BASE_URL/api/v1/invoices/2/copy")
+    if [ "$status" = "400" ]; then
+        pass "Copy due_date before default date returns 400"
+    else
+        fail "Copy due_date before default date (expected 400, got $status)"
+    fi
+}
+
+test_copy_unknown_item_id() {
+    local status
+    status=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" -d '{"items":[{"item_id":9999,"quantity":1}]}' "$BASE_URL/api/v1/invoices/2/copy")
+    if [ "$status" = "400" ]; then
+        pass "Copy with unknown item_id returns 400"
+    else
+        fail "Copy unknown item_id (expected 400, got $status)"
+    fi
+}
+
+test_copy_negative_quantity() {
+    local status
+    status=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" -d '{"items":[{"item_id":3,"quantity":-5}]}' "$BASE_URL/api/v1/invoices/2/copy")
+    if [ "$status" = "400" ]; then
+        pass "Copy with negative quantity returns 400"
+    else
+        fail "Copy negative quantity (expected 400, got $status)"
+    fi
+}
+
+test_copy_items_not_array() {
+    local status
+    status=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" -d '{"items":"invalid"}' "$BASE_URL/api/v1/invoices/2/copy")
+    if [ "$status" = "400" ]; then
+        pass "Copy items not array returns 400"
+    else
+        fail "Copy items not array (expected 400, got $status)"
+    fi
+}
+
+test_patch_valid_zero_quantity() {
+    local body
+    body=$(curl -sf -X PATCH -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" -d '{"items":[{"item_id":1,"quantity":0}]}' "$BASE_URL/api/v1/invoices/1")
+    if echo "$body" | jq -e '.items[0].quantity == 0' > /dev/null 2>&1; then
+        pass "PATCH valid zero quantity accepted"
+    else
+        fail "PATCH zero quantity (body: $(echo "$body" | head -c 200))"
+    fi
+}
+
+test_patch_valid_tax_rate_id_zero() {
+    local body
+    body=$(curl -sf -X PATCH -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" -d '{"items":[{"item_id":1,"tax_rate_id":0}]}' "$BASE_URL/api/v1/invoices/1")
+    if echo "$body" | jq -e '.items[0].tax_rate_id == 0' > /dev/null 2>&1; then
+        pass "PATCH valid tax_rate_id=0 accepted (no tax)"
+    else
+        fail "PATCH tax_rate_id=0 (body: $(echo "$body" | head -c 200))"
+    fi
+}
+
 # --- Runner ---
 
 cmd_run() {
@@ -251,9 +441,28 @@ cmd_run() {
     test_copy_invoice
     test_patch_draft_date
     test_patch_draft_item
+    test_patch_negative_quantity
+    test_patch_negative_price
+    test_patch_scientific_notation
+    test_patch_null_price
+    test_patch_boolean_quantity
+    test_patch_invalid_tax_rate_id
+    test_patch_invalid_date
+    test_patch_due_date_before_date
+    test_patch_discount_exceeds_subtotal
+    test_patch_item_without_item_id
+    test_patch_wrong_item_id
+    test_patch_items_not_array
+    test_patch_valid_zero_quantity
+    test_patch_valid_tax_rate_id_zero
     test_status_draft_to_sent
     test_status_backwards
     test_patch_non_draft
+    test_copy_invalid_date
+    test_copy_due_date_before_date
+    test_copy_unknown_item_id
+    test_copy_negative_quantity
+    test_copy_items_not_array
 
     echo ""
     echo "============================"
