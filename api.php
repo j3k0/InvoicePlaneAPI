@@ -76,7 +76,7 @@ function validate_dates(array $body, ?PDO $db = null, ?int $invoice_id = null): 
     $validate_date_field = function (?string $d, string $label): string {
         if ($d === null) return '';
         $dt = DateTimeImmutable::createFromFormat('Y-m-d', $d);
-        if (!$dt || $dt->format('Y-m-d') !== $d || $dt->format('Y') === '0000') {
+        if (!$dt || $dt->format('Y-m-d') !== $d) {
             err(400, "$label must be a valid date in Y-m-d format");
         }
         return $d;
@@ -185,7 +185,7 @@ function validate_item_fields(array $item, ?PDO $db = null, ?array $db_row = nul
         $v = $item['item_date'];
         if ($v !== null) {
             $dt = DateTimeImmutable::createFromFormat('Y-m-d', $v);
-            if (!$dt || $dt->format('Y-m-d') !== $v || $dt->format('Y') === '0000') {
+            if (!$dt || $dt->format('Y-m-d') !== $v) {
                 err(400, 'item_date must be a valid date in Y-m-d format');
             }
         }
@@ -468,6 +468,9 @@ try {
 
             $date     = $body['date']     ?? date('Y-m-d');
             $due_date = $body['due_date'] ?? date('Y-m-d', strtotime("$date +30 days"));
+            if ($due_date < $date) {
+                err(400, 'due_date must be on or after date');
+            }
             $number   = generate_invoice_number($db, (int) $orig['invoice_group_id'], $date);
             $url_key  = bin2hex(random_bytes(16));
 
