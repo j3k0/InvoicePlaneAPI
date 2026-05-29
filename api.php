@@ -69,6 +69,145 @@ function tax_rate(PDO $db, ?int $rate_id): float {
     }
 }
 
+function validate_dates(array $body, ?PDO $db = null, ?int $invoice_id = null): void {
+    $date = $body['date'] ?? null;
+    $due_date = $body['due_date'] ?? null;
+
+    $validate_date_field = function (?string $d, string $label): string {
+        if ($d === null) return '';
+        $dt = DateTimeImmutable::createFromFormat('Y-m-d', $d);
+        if (!$dt || $dt->format('Y-m-d') !== $d) {
+            err(400, "$label must be a valid date in Y-m-d format");
+        }
+        return $d;
+    };
+
+    $date = $validate_date_field($date, 'date') ?: null;
+    $due_date = $validate_date_field($due_date, 'due_date') ?: null;
+
+    if ($due_date !== null || $date !== null) {
+        if ($db !== null && $invoice_id !== null) {
+            if ($date === null || $due_date === null) {
+                $s = $db->prepare('SELECT invoice_date_created, invoice_date_due FROM ip_invoices WHERE invoice_id = ?');
+                $s->execute([$invoice_id]);
+                $row = $s->fetch();
+                if (!$row) err(404, 'invoice not found');
+                if ($date === null) $date = $row['invoice_date_created'];
+                if ($due_date === null) $due_date = $row['invoice_date_due'];
+            }
+        }
+        if ($date !== null && $due_date !== null && $due_date < $date) {
+            err(400, 'due_date must be on or after date');
+        }
+    }
+}
+
+function validate_items_array($items): void {
+    if ($items !== null && !is_array($items)) {
+        err(400, 'items must be an array');
+    }
+}
+
+function validate_item_fields(array $item, ?PDO $db = null, ?array $db_row = null): void {
+    $numeric_fields = [
+        'quantity'         => ['max' => 999999],
+        'price'            => ['max' => 999999999],
+        'discount_amount'  => ['max' => 999999999],
+    ];
+
+    foreach ($numeric_fields as $field => $opts) {
+        if (!array_key_exists($field, $item)) continue;
+        $v = $item[$field];
+        if (is_bool($v) || $v === null) {
+            err(400, "$field must be a non-negative number");
+        }
+        if (!is_string($v) && !is_int($v) && !is_float($v)) {
+            err(400, "$field must be a non-negative number");
+        }
+        $sv = (string) $v;
+        if (!preg_match('/^\d+(\.\d+)?$/', $sv)) {
+            err(400, "$field must be a non-negative number");
+        }
+        $fv = (float) $v;
+        if ($fv < 0) {
+            err(400, "$field must be a non-negative number");
+        }
+        if ($fv > $opts['max']) {
+            err(400, "$field must not exceed {$opts['max']}");
+        }
+    }
+
+    if (array_key_exists('discount_amount', $item)) {
+        $qty = (float) ($item['quantity'] ?? ($db_row['item_quantity'] ?? 0));
+        $price = (float) ($item['price'] ?? ($db_row['item_price'] ?? 0));
+        $disc = (float) $item['discount_amount'];
+        if ($disc > $qty * $price) {
+            err(400, 'discount_amount must not exceed quantity * price');
+        }
+    }
+
+    if (array_key_exists('order', $item)) {
+        $v = $item['order'];
+        if (!is_int($v) && !(is_string($v) && ctype_digit($v))) {
+            err(400, 'order must be an integer between 0 and 999');
+        }
+        if ((int) $v < 0 || (int) $v > 999) {
+            err(400, 'order must be an integer between 0 and 999');
+        }
+    }
+
+    if (array_key_exists('tax_rate_id', $item) && $item['tax_rate_id'] !== null) {
+        $v = $item['tax_rate_id'];
+        if (is_bool($v)) {
+            err(400, 'tax_rate_id must be a positive integer');
+        }
+        if (!is_int($v) && !(is_string($v) && ctype_digit($v))) {
+            err(400, 'tax_rate_id must be a positive integer');
+        }
+        $id = (int) $v;
+        if ($id < 0) {
+            err(400, 'tax_rate_id must be a positive integer');
+        }
+        if ($id > 0) {
+            static $seen = [];
+            if (!isset($seen[$id])) {
+                $s = ($db ?? db())->prepare('SELECT 1 FROM ip_tax_rates WHERE tax_rate_id = ?');
+                $s->execute([$id]);
+                $seen[$id] = (bool) $s->fetch();
+            }
+            if (!$seen[$id]) {
+                err(400, 'invalid tax_rate_id');
+            }
+        }
+    }
+
+    if (array_key_exists('item_date', $item)) {
+        $v = $item['item_date'];
+        if ($v !== null) {
+            $dt = DateTimeImmutable::createFromFormat('Y-m-d', $v);
+            if (!$dt || $dt->format('Y-m-d') !== $v) {
+                err(400, 'item_date must be a valid date in Y-m-d format');
+            }
+        }
+    }
+
+    if (array_key_exists('name', $item)) {
+        $v = $item['name'];
+        if (!is_string($v)) err(400, 'name must be a string');
+        if (mb_strlen($v) < 1 || mb_strlen($v) > 255) err(400, 'name must be 1-255 characters');
+    }
+    if (array_key_exists('description', $item)) {
+        $v = $item['description'];
+        if (!is_string($v)) err(400, 'description must be a string');
+        if (mb_strlen($v) > 65535) err(400, 'description must be at most 65535 characters');
+    }
+    if (array_key_exists('unit', $item)) {
+        $v = $item['unit'];
+        if (!is_string($v)) err(400, 'unit must be a string');
+        if (mb_strlen($v) > 50) err(400, 'unit must be at most 50 characters');
+    }
+}
+
 function recompute_item(PDO $db, int $item_id): void {
     $s = $db->prepare('SELECT item_quantity, item_price, item_discount_amount, item_tax_rate_id FROM ip_invoice_items WHERE item_id = ?');
     $s->execute([$item_id]);
@@ -269,11 +408,14 @@ try {
 
         if (count($parts) === 3 && $method === 'PATCH') {
             $body = body_json();
+            validate_items_array($body['items'] ?? null);
             $s = $db->prepare('SELECT invoice_status_id FROM ip_invoices WHERE invoice_id=?');
             $s->execute([$id]);
             $row = $s->fetch();
             if (!$row) err(404, 'invoice not found');
             if ((int) $row['invoice_status_id'] !== 1) err(409, 'invoice not in draft status');
+
+            validate_dates($body, $db, $id);
 
             $up = []; $args = [];
             if (isset($body['date']))     { $up[] = 'invoice_date_created=?'; $args[] = $body['date']; }
@@ -286,17 +428,27 @@ try {
             }
             $cols = ['quantity' => 'item_quantity', 'price' => 'item_price', 'description' => 'item_description', 'name' => 'item_name', 'unit' => 'item_product_unit', 'order' => 'item_order', 'discount_amount' => 'item_discount_amount', 'tax_rate_id' => 'item_tax_rate_id', 'item_date' => 'item_date'];
             foreach ($body['items'] ?? [] as $i) {
-                if (!isset($i['item_id'])) continue;
+                if (!isset($i['item_id'])) {
+                    err(400, 'item_id is required for each item');
+                }
+                $iid = (int) $i['item_id'];
+                $s = $db->prepare('SELECT item_id, item_quantity, item_price FROM ip_invoice_items WHERE item_id=? AND invoice_id=?');
+                $s->execute([$iid, $id]);
+                $db_row = $s->fetch();
+                if (!$db_row) err(400, 'item_id does not belong to this invoice');
+
+                validate_item_fields($i, $db, $db_row);
+
                 $iup = []; $iargs = [];
                 foreach ($cols as $k => $col) {
-                    if (array_key_exists($k, $i)) { $iup[] = "$col=?"; $iargs[] = $i[$k]; }
+                    if (isset($i[$k])) { $iup[] = "$col=?"; $iargs[] = $i[$k]; }
                 }
                 if ($iup) {
-                    $iargs[] = (int) $i['item_id'];
+                    $iargs[] = $iid;
                     $iargs[] = $id;
                     $s = $db->prepare('UPDATE ip_invoice_items SET ' . implode(',', $iup) . ' WHERE item_id=? AND invoice_id=?');
                     $s->execute($iargs);
-                    recompute_item($db, (int) $i['item_id']);
+                    recompute_item($db, $iid);
                 }
             }
             recompute_invoice($db, $id);
@@ -305,16 +457,20 @@ try {
 
         if (count($parts) === 4 && $parts[3] === 'copy' && $method === 'POST') {
             $body = body_json();
+            validate_items_array($body['items'] ?? null);
+
             $s = $db->prepare('SELECT * FROM ip_invoices WHERE invoice_id=?');
             $s->execute([$id]);
             $orig = $s->fetch();
             if (!$orig) err(404, 'invoice not found');
-            $s = $db->prepare('SELECT * FROM ip_invoice_items WHERE invoice_id=? ORDER BY item_order, item_id');
-            $s->execute([$id]);
-            $items = $s->fetchAll();
+
+            validate_dates($body);
 
             $date     = $body['date']     ?? date('Y-m-d');
             $due_date = $body['due_date'] ?? date('Y-m-d', strtotime("$date +30 days"));
+            if ($due_date < $date) {
+                err(400, 'due_date must be on or after date');
+            }
             $number   = generate_invoice_number($db, (int) $orig['invoice_group_id'], $date);
             $url_key  = bin2hex(random_bytes(16));
 
@@ -322,29 +478,43 @@ try {
             $s->execute([$orig['user_id'], $orig['client_id'], $orig['invoice_group_id'], $date, $due_date, $number, $orig['invoice_terms'] ?? '', $url_key, $orig['payment_method'] ?? 0]);
             $new_id = (int) $db->lastInsertId();
 
-            $overrides = [];
-            foreach ($body['items'] ?? [] as $i) {
-                if (isset($i['item_id'])) $overrides[(int) $i['item_id']] = $i;
+            $items = $db->prepare('SELECT * FROM ip_invoice_items WHERE invoice_id=? ORDER BY item_order, item_id');
+            $items->execute([$id]);
+            $orig_items = $items->fetchAll();
+            $orig_by_id = [];
+            foreach ($orig_items as $oi) {
+                $orig_by_id[(int) $oi['item_id']] = $oi;
             }
 
+            $overrides = [];
+            foreach ($body['items'] ?? [] as $i) {
+                if (isset($i['item_id'])) {
+                    $iid = (int) $i['item_id'];
+                    if (!isset($orig_by_id[$iid])) {
+                        err(400, 'item_id does not belong to this invoice');
+                    }
+                    validate_item_fields($i, $db, $orig_by_id[$iid]);
+                    $overrides[$iid] = $i;
+                }
+            }
             $ins = $db->prepare('INSERT INTO ip_invoice_items (invoice_id, item_tax_rate_id, item_product_id, item_task_id, item_date_added, item_name, item_description, item_quantity, item_price, item_discount_amount, item_order, item_product_unit, item_product_unit_id, item_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
-            foreach ($items as $it) {
+            foreach ($orig_items as $it) {
                 $ov = $overrides[(int) $it['item_id']] ?? [];
                 $ins->execute([
                     $new_id,
-                    $ov['tax_rate_id']     ?? $it['item_tax_rate_id'] ?? 0,
+                    isset($ov['tax_rate_id']) ? $ov['tax_rate_id'] : ($it['item_tax_rate_id'] ?? 0),
                     $it['item_product_id'],
                     $it['item_task_id'],
                     $date,
-                    $ov['name']            ?? $it['item_name'],
-                    $ov['description']     ?? $it['item_description'],
-                    $ov['quantity']        ?? $it['item_quantity'],
-                    $ov['price']           ?? $it['item_price'],
-                    $ov['discount_amount'] ?? $it['item_discount_amount'],
-                    $ov['order']           ?? $it['item_order'],
-                    $ov['unit']            ?? $it['item_product_unit'],
+                    isset($ov['name']) ? $ov['name'] : $it['item_name'],
+                    isset($ov['description']) ? $ov['description'] : $it['item_description'],
+                    isset($ov['quantity']) ? $ov['quantity'] : $it['item_quantity'],
+                    isset($ov['price']) ? $ov['price'] : $it['item_price'],
+                    isset($ov['discount_amount']) ? $ov['discount_amount'] : $it['item_discount_amount'],
+                    isset($ov['order']) ? $ov['order'] : $it['item_order'],
+                    isset($ov['unit']) ? $ov['unit'] : $it['item_product_unit'],
                     $it['item_product_unit_id'],
-                    $it['item_date'],
+                    isset($ov['item_date']) ? $ov['item_date'] : $it['item_date'],
                 ]);
                 recompute_item($db, (int) $db->lastInsertId());
             }

@@ -413,6 +413,53 @@ WHERE invoice_group_id = ?
 - `GET /health` is the only unauthenticated endpoint
 - No exposure of `ip_users` table, session tokens, or internal InvoicePlane paths
 
+## Input Validation
+
+All mutation endpoints validate input before writing to the database. Validation failures return `400` with `{"error": "message"}`.
+
+### Date fields (`date`, `due_date`, `item_date`)
+
+| Rule | Detail |
+|------|--------|
+| Format | Must be `Y-m-d` (strict round-trip check; rejects `0000-00-00`) |
+| Cross-field | `due_date` must be >= `date`; for PATCH with only one date, the other is fetched from DB |
+
+### Numeric fields (`quantity`, `price`, `discount_amount`)
+
+| Rule | Detail |
+|------|--------|
+| Type | Must match `/^\d+(\.\d+)?$/` (rejects scientific notation, negatives, null, booleans) |
+| Minimum | >= 0 (zero is valid) |
+| Maximum | `quantity` <= 999999, `price` <= 999999999, `discount_amount` <= 999999999 |
+| Cross-field | `discount_amount` must be <= effective quantity * effective price |
+
+### Integer fields (`order`, `tax_rate_id`)
+
+| Rule | Detail |
+|------|--------|
+| `order` | Integer 0-999; rejects booleans, floats, null |
+| `tax_rate_id` | `0` or absent = no tax (no FK check); positive must exist in `ip_tax_rates`; rejects negatives, booleans |
+
+### String fields (`name`, `description`, `unit`)
+
+| Rule | Detail |
+|------|--------|
+| `name` | String, 1-255 characters (non-empty) |
+| `description` | String, max 65535 characters |
+| `unit` | String, max 50 characters |
+
+### Structural validation
+
+| Rule | Detail |
+|------|--------|
+| `items` | Must be an array if provided |
+| `item_id` | Required for each item in PATCH; must belong to the target invoice. **Breaking change:** previously items without `item_id` were silently skipped; now they return 400 |
+| Null rejection | Null values for numeric fields are rejected (prevents silent zeroing) |
+
+### Overflow safety
+
+Caps prevent computed-column overflow: max subtotal = 999999 * 999999999 ≈ 1e15, well within DECIMAL(20,2) max (~1e18).
+
 ## Implementation Notes
 
 - File: `/srv/docker/invoiceplane/html/api/index.php` (or wherever the web root is volume-mounted)
