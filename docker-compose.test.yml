@@ -33,6 +33,7 @@ services:
     volumes:
       - ./api.php:/var/www/html/api/index.php:ro
       - /var/lib/invoiceplane
+      - ./tests/fpm-env.conf:/etc/php/8.3/fpm/pool.d/zz-clear-env.conf:ro
     depends_on:
       mysql:
         condition: service_healthy
