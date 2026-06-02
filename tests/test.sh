@@ -433,6 +433,22 @@ test_env_secret_header_injection() {
     fi
 }
 
+test_env_secret_http_prefix_header_injection() {
+    # PHP auto-populates HTTP headers into $_SERVER with HTTP_ prefix
+    # e.g. HTTP_INVOICEPLANE_API_KEY -> $_SERVER['HTTP_INVOICEPLANE_API_KEY']
+    # This verifies that env_secret() ignores these too
+    local status
+    status=$(curl -s -o /dev/null -w '%{http_code}' \
+        -H "Authorization: Bearer wrong-key" \
+        -H "HTTP_INVOICEPLANE_API_KEY: attacker-key" \
+        "$BASE_URL/api/v1/invoices")
+    if [ "$status" = "401" ]; then
+        pass "env_secret: HTTP_ prefix header injection cannot bypass auth"
+    else
+        fail "env_secret HTTP_ prefix: expected 401, got $status"
+    fi
+}
+
 # --- Runner ---
 
 cmd_run() {
@@ -445,6 +461,7 @@ cmd_run() {
     test_auth_no_key
     test_auth_wrong_key
     test_env_secret_header_injection
+    test_env_secret_http_prefix_header_injection
     test_list_invoices_default
     test_list_all_statuses
     test_filter_status_paid

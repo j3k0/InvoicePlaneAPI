@@ -13,6 +13,7 @@ function env(string $key, string $default = ''): string {
     return $v === false ? $default : $v;
 }
 
+// Only reads from getenv() — never $_SERVER, preventing HTTP header injection of secrets
 function env_secret(string $key, string $default = ''): string {
     $v = getenv($key);
     return $v === false ? $default : $v;
