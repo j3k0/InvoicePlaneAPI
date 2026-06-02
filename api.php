@@ -13,6 +13,11 @@ function env(string $key, string $default = ''): string {
     return $v === false ? $default : $v;
 }
 
+function env_secret(string $key, string $default = ''): string {
+    $v = getenv($key);
+    return $v === false ? $default : $v;
+}
+
 function jr($data, int $status = 200): void {
     http_response_code($status);
     echo json_encode($data, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
@@ -24,7 +29,7 @@ function err(int $status, string $message): void {
 }
 
 function check_auth(): void {
-    $keys = env('INVOICEPLANE_API_KEY');
+    $keys = env_secret('INVOICEPLANE_API_KEY');
     $auth = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
     if ($keys === '' || !preg_match('/^Bearer\s+(.+)$/i', $auth, $m)) err(401, 'unauthorized');
     foreach (explode(',', $keys) as $k) {
@@ -38,8 +43,8 @@ function db(): PDO {
     static $pdo = null;
     if ($pdo) return $pdo;
     $dsn = sprintf('mysql:host=%s;dbname=%s;charset=utf8mb4',
-        env('INVOICEPLANE_DB_HOST', 'localhost'), env('INVOICEPLANE_DB_NAME'));
-    $pdo = new PDO($dsn, env('INVOICEPLANE_DB_USER'), env('INVOICEPLANE_DB_PASS'), [
+        env_secret('INVOICEPLANE_DB_HOST', 'localhost'), env_secret('INVOICEPLANE_DB_NAME'));
+    $pdo = new PDO($dsn, env_secret('INVOICEPLANE_DB_USER'), env_secret('INVOICEPLANE_DB_PASS'), [
         PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
         PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
         PDO::ATTR_EMULATE_PREPARES   => false,
@@ -283,8 +288,7 @@ function fetch_invoice(PDO $db, int $id): ?array {
         $inv['client_state'] ?? '',
         $inv['client_country'] ?? '',
     ], fn($x) => $x !== '' && $x !== null));
-    $scheme = $_SERVER['REQUEST_SCHEME'] ?? (($_SERVER['HTTPS'] ?? '') === 'on' ? 'https' : 'http');
-    $base = rtrim(env('INVOICEPLANE_BASE_URL', "$scheme://{$_SERVER['HTTP_HOST']}"), '/');
+    $base = rtrim(env_secret('INVOICEPLANE_BASE_URL'), '/');
     return [
         'id'           => (int) $inv['invoice_id'],
         'number'       => $inv['invoice_number'],
