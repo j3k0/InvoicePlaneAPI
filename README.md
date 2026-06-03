@@ -65,6 +65,21 @@ location /api/index.php {
 }
 ```
 
+Note: For production deployments, add rate limiting to the main nginx `http` block (e.g., `/etc/nginx/nginx.conf`):
+
+```nginx
+http {
+    limit_req_zone $binary_remote_addr zone=api:10m rate=10r/s;
+    # ... existing http block ...
+    server {
+        location /api/index.php {
+            limit_req zone=api burst=20 nodelay;
+            # ... existing location config ...
+        }
+    }
+}
+```
+
 ## Docker Installation
 
 Add a bind mount to your `docker-compose.yml`:

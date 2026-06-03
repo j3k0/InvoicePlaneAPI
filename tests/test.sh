@@ -26,9 +26,9 @@ cmd_up() {
     local attempts=0
     while [ $attempts -lt 30 ]; do
         if curl -sf "$BASE_URL/api/v1/health" > /dev/null 2>&1; then
-            local db_status
-            db_status=$(curl -sf "$BASE_URL/api/v1/health" | jq -r '.db' 2>/dev/null || echo "")
-            if [ "$db_status" = "connected" ]; then
+            local db_ok
+            db_ok=$(curl -sf "$BASE_URL/api/v1/health" | jq -r '.ok' 2>/dev/null || echo "")
+            if [ "$db_ok" = "true" ]; then
                 echo "API is healthy (attempt $((attempts + 1)))."
                 return 0
             fi
@@ -51,8 +51,8 @@ cmd_down() {
 test_health() {
     local body
     body=$(curl -sf "$BASE_URL/api/v1/health")
-    if echo "$body" | jq -e '.status == "ok" and .db == "connected"' > /dev/null 2>&1; then
-        pass "Health check returns ok and db connected"
+    if echo "$body" | jq -e '.ok == true' > /dev/null 2>&1; then
+        pass "Health check returns ok true"
     else
         fail "Health check (body: $(echo "$body" | head -c 200))"
     fi
@@ -549,6 +549,103 @@ sys.stdout.write('x' * 1500000)
     fi
 }
 
+test_security_headers() {
+    local headers
+    headers=$(curl -sf -I -H "Authorization: Bearer $API_KEY" "$BASE_URL/api/v1/invoices" 2>/dev/null || true)
+    if echo "$headers" | grep -i 'Strict-Transport-Security:' > /dev/null 2>&1; then
+        pass "Security headers: HSTS present"
+    else
+        fail "Security headers: HSTS missing"
+    fi
+    if echo "$headers" | grep -i 'Cache-Control:' > /dev/null 2>&1; then
+        pass "Security headers: Cache-Control present"
+    else
+        fail "Security headers: Cache-Control missing"
+    fi
+    if echo "$headers" | grep -i 'Referrer-Policy:' > /dev/null 2>&1; then
+        pass "Security headers: Referrer-Policy present"
+    else
+        fail "Security headers: Referrer-Policy missing"
+    fi
+}
+
+test_405_wrong_method() {
+    local status allow
+    status=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer $API_KEY" "$BASE_URL/api/v1/invoices")
+    if [ "$status" = "405" ]; then
+        pass "405: POST on list invoices returns 405"
+    else
+        fail "405: POST on list invoices (expected 405, got $status)"
+    fi
+
+    status=$(curl -s -o /dev/null -w '%{http_code}' -X DELETE -H "Authorization: Bearer $API_KEY" "$BASE_URL/api/v1/invoices/1")
+    if [ "$status" = "405" ]; then
+        pass "405: DELETE on single invoice returns 405"
+    else
+        fail "405: DELETE on single invoice (expected 405, got $status)"
+    fi
+
+    allow=$(curl -s -o /dev/null -w '%{redirect_url}' -X OPTIONS -H "Authorization: Bearer $API_KEY" "$BASE_URL/api/v1/invoices/1" 2>/dev/null || true)
+    status=$(curl -s -o /dev/null -w '%{http_code}' -X OPTIONS -H "Authorization: Bearer $API_KEY" "$BASE_URL/api/v1/invoices/1")
+    if [ "$status" = "405" ]; then
+        local allow_header
+        allow_header=$(curl -s -D - -o /dev/null -X OPTIONS -H "Authorization: Bearer $API_KEY" "$BASE_URL/api/v1/invoices/1" 2>/dev/null | grep -i '^Allow:' | tr -d '\r')
+        pass "405: OPTIONS returns 405 with Allow header ($allow_header)"
+    else
+        fail "405: OPTIONS on single invoice (expected 405, got $status)"
+    fi
+}
+
+test_empty_patch_body() {
+    local status
+    status=$(curl -s -o /dev/null -w '%{http_code}' -X PATCH -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" -d '{}' "$BASE_URL/api/v1/invoices/1")
+    if [ "$status" = "400" ]; then
+        pass "PATCH empty body returns 400"
+    else
+        fail "PATCH empty body (expected 400, got $status)"
+    fi
+}
+
+test_content_type_validation() {
+    local status
+
+    # PATCH without Content-Type
+    status=$(curl -s -o /dev/null -w '%{http_code}' -X PATCH -H "Authorization: Bearer $API_KEY" -d '{"date":"2026-06-01"}' "$BASE_URL/api/v1/invoices/1")
+    if [ "$status" = "415" ]; then
+        pass "Content-Type: PATCH without application/json returns 415"
+    else
+        fail "Content-Type: PATCH without application/json (expected 415, got $status)"
+    fi
+
+    # POST status without Content-Type
+    status=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer $API_KEY" -d '{"status":"sent"}' "$BASE_URL/api/v1/invoices/1/status")
+    if [ "$status" = "415" ]; then
+        pass "Content-Type: POST status without application/json returns 415"
+    else
+        fail "Content-Type: POST status without application/json (expected 415, got $status)"
+    fi
+}
+
+test_search_like_escaping() {
+    local body
+    body=$(curl -sf -H "Authorization: Bearer $API_KEY" "$BASE_URL/api/v1/invoices?q=%25&status=all")
+    if echo "$body" | jq -e '.total == 0' > /dev/null 2>&1; then
+        pass "Search: LIKE wildcard % is escaped (returns 0 matches)"
+    else
+        fail "Search: LIKE wildcard % (expected 0 matches, total=$(echo "$body" | jq '.total'))"
+    fi
+}
+
+test_health_no_auth() {
+    local body
+    body=$(curl -sf "$BASE_URL/api/v1/health")
+    if echo "$body" | jq -e '.ok == true' > /dev/null 2>&1; then
+        pass "Health endpoint still accessible without auth"
+    else
+        fail "Health endpoint without auth (body: $(echo "$body" | head -c 200))"
+    fi
+}
+
 # --- Runner ---
 
 cmd_run() {
@@ -558,6 +655,8 @@ cmd_run() {
     echo ""
 
     test_health
+    test_health_no_auth
+    test_security_headers
     test_auth_no_key
     test_auth_wrong_key
     test_env_secret_header_injection
@@ -598,6 +697,10 @@ cmd_run() {
     test_status_draft_to_sent
     test_status_backwards
     test_patch_non_draft
+    test_405_wrong_method
+    test_empty_patch_body
+    test_content_type_validation
+    test_search_like_escaping
     test_copy_invalid_date
     test_copy_due_date_before_date
     test_copy_unknown_item_id

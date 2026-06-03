@@ -3,6 +3,10 @@ declare(strict_types=1);
 
 header('Content-Type: application/json');
 header('X-Content-Type-Options: nosniff');
+header('Strict-Transport-Security: max-age=63072000; includeSubDomains');
+header('Cache-Control: no-store, no-cache, must-revalidate');
+header('Pragma: no-cache');
+header('Referrer-Policy: no-referrer');
 
 const STATUS_NAMES = [1 => 'draft', 2 => 'sent', 3 => 'viewed', 4 => 'paid'];
 const STATUS_IDS   = ['draft' => 1, 'sent' => 2, 'viewed' => 3, 'paid' => 4];
@@ -44,12 +48,35 @@ function err(int $status, string $message): void {
 function check_auth(): void {
     $keys = env_secret('INVOICEPLANE_API_KEY');
     $auth = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
-    if ($keys === '' || !preg_match('/^Bearer\s+(.+)$/i', $auth, $m)) err(401, 'unauthorized');
-    foreach (explode(',', $keys) as $k) {
-        $k = trim($k);
-        if ($k !== '' && hash_equals($k, $m[1])) return;
+    if ($keys === '' || !preg_match('/^Bearer\s+(.+)$/i', $auth, $m)) {
+        audit_log('auth_failure', 'missing or malformed authorization header');
+        err(401, 'unauthorized');
     }
-    err(401, 'unauthorized');
+    $token = $m[1];
+    $matched = false;
+    foreach (array_filter(array_map('trim', explode(',', $keys)), fn($k) => $k !== '') as $k) {
+        if (strlen($k) < 32) {
+            error_log('InvoicePlaneAPI warning: API key "' . substr($k, 0, 4) . '..." is shorter than 32 characters');
+        }
+        if (hash_equals($k, $token)) $matched = true;
+    }
+    if (!$matched) {
+        audit_log('auth_failure', 'invalid API key token');
+        err(401, 'unauthorized');
+    }
+}
+
+function audit_log(string $event, string $detail = ''): void {
+    $auth = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
+    $key_prefix = '';
+    if (preg_match('/^Bearer\s+(.+)$/i', $auth, $m)) {
+        $key_prefix = 'key:' . substr($m[1], 0, 8) . '...';
+    }
+    $ip = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
+    $method = $_SERVER['REQUEST_METHOD'] ?? '?';
+    $path = $_SERVER['PATH_INFO'] ?? ($_SERVER['REQUEST_URI'] ?? '/');
+    $msg = sprintf('[%s] ip=%s %s event=%s detail=%s %s %s', date('c'), $ip, $key_prefix, $event, $detail, $method, $path);
+    error_log('InvoicePlaneAPI audit: ' . trim($msg));
 }
 
 function db(): PDO {
@@ -83,6 +110,13 @@ function body_json(): array {
     return $d;
 }
 
+function require_json_content_type(): void {
+    $ct = $_SERVER['CONTENT_TYPE'] ?? '';
+    if (!preg_match('#^application/json(;|\s*$)#i', $ct)) {
+        err(415, 'content-type must be application/json');
+    }
+}
+
 function tax_rate(PDO $db, ?int $rate_id): float {
     static $cache = [];
     if (!$rate_id) return 0.0;
@@ -91,9 +125,11 @@ function tax_rate(PDO $db, ?int $rate_id): float {
         $s = $db->prepare('SELECT tax_rate_percent FROM ip_tax_rates WHERE tax_rate_id = ?');
         $s->execute([$rate_id]);
         $r = $s->fetch();
-        return $cache[$rate_id] = $r ? (float) $r['tax_rate_percent'] : 0.0;
+        $rate = $r ? (float) $r['tax_rate_percent'] : 0.0;
+        $cache[$rate_id] = $rate;  // cache only on successful lookup
+        return $rate;
     } catch (Throwable $e) {
-        return $cache[$rate_id] = 0.0;
+        return 0.0;  // do NOT cache errors — avoids stale 0.0 across the request
     }
 }
 
@@ -365,8 +401,8 @@ if (($parts[0] ?? '') === 'api') array_shift($parts);
 if (($parts[0] ?? '') !== 'v1') err(404, 'not found');
 
 if (count($parts) === 2 && $parts[1] === 'health' && $method === 'GET') {
-    try { db()->query('SELECT 1'); jr(['status' => 'ok', 'db' => 'connected']); }
-    catch (Throwable $e) { jr(['status' => 'error', 'db' => 'disconnected'], 503); }
+    try { db()->query('SELECT 1'); jr(['ok' => true]); }
+    catch (Throwable $e) { jr(['ok' => false], 503); }
 }
 
 check_auth();
@@ -378,8 +414,9 @@ try {
         $where = []; $params = [];
         if (!empty($_GET['client_id'])) { $where[] = 'i.client_id = ?'; $params[] = (int) $_GET['client_id']; }
         if (!empty($_GET['q'])) {
+            $q = str_replace(['%', '_'], ['\\%', '\\_'], $_GET['q']);
             $where[] = "EXISTS (SELECT 1 FROM ip_invoice_items ii WHERE ii.invoice_id=i.invoice_id AND (ii.item_name LIKE CONCAT('%',?,'%') OR ii.item_description LIKE CONCAT('%',?,'%')))";
-            $params[] = $_GET['q']; $params[] = $_GET['q'];
+            $params[] = $q; $params[] = $q;
         }
         $status = $_GET['status'] ?? '';
         if ($status === 'all') {
@@ -458,6 +495,8 @@ try {
         // ───────────────────────────────────────────────────────────────
         if (count($parts) === 3 && $method === 'PATCH') {
             $body = body_json();
+            if ($body === []) err(400, 'request body required');
+            require_json_content_type();
             validate_items_array($body['items'] ?? null);
             $db->beginTransaction();
             try {
@@ -503,6 +542,7 @@ try {
                 }
                 recompute_invoice($db, $id);
                 $db->commit();
+                audit_log('invoice_update', "invoice_id=$id");
                 jr(fetch_invoice($db, $id));
             } catch (Throwable $e) {
                 $db->rollBack();
@@ -512,6 +552,7 @@ try {
 
         if (count($parts) === 4 && $parts[3] === 'copy' && $method === 'POST') {
             $body = body_json();
+            require_json_content_type();
             validate_items_array($body['items'] ?? null);
 
             $db->beginTransaction();
@@ -575,6 +616,7 @@ try {
                 }
                 recompute_invoice($db, $new_id);
                 $db->commit();
+                audit_log('invoice_copy', "invoice_id=$id new_id=$new_id");
                 jr(['id' => $new_id, 'number' => $number, 'status' => 'draft', 'url' => "/api/v1/invoices/$new_id"], 201);
             } catch (Throwable $e) {
                 $db->rollBack();
@@ -584,6 +626,7 @@ try {
 
         if (count($parts) === 4 && $parts[3] === 'status' && $method === 'POST') {
             $body = body_json();
+            require_json_content_type();
             $name = $body['status'] ?? '';
             if (!isset(STATUS_IDS[$name])) err(400, 'invalid status');
             $db->beginTransaction();
@@ -623,11 +666,35 @@ try {
                 $s = $db->prepare('UPDATE ip_invoices SET invoice_status_id=?, is_read_only=?, invoice_date_modified=NOW() WHERE invoice_id=?');
                 $s->execute([$new, $new > 1 ? 1 : 0, $id]);
                 $db->commit();
+                audit_log('invoice_status', "invoice_id=$id status=$name");
                 jr(['status' => $name]);
             } catch (Throwable $e) {
                 $db->rollBack();
                 throw $e;
             }
+        }
+    }
+
+// Check if path matches a known route but method doesn't — return 405
+    if (count($parts) >= 1 && $parts[0] === 'v1') {
+        $known = false;
+        $allowed_methods = [];
+
+        if (count($parts) === 2 && $parts[1] === 'health') {
+            $known = true; $allowed_methods = ['GET'];
+        } elseif (count($parts) === 2 && $parts[1] === 'invoices') {
+            $known = true; $allowed_methods = ['GET'];
+        } elseif (count($parts) === 3 && $parts[1] === 'invoices' && ctype_digit($parts[2])) {
+            $known = true; $allowed_methods = ['GET', 'PATCH'];
+        } elseif (count($parts) === 4 && $parts[1] === 'invoices' && ctype_digit($parts[2]) && $parts[3] === 'copy') {
+            $known = true; $allowed_methods = ['POST'];
+        } elseif (count($parts) === 4 && $parts[1] === 'invoices' && ctype_digit($parts[2]) && $parts[3] === 'status') {
+            $known = true; $allowed_methods = ['POST'];
+        }
+
+        if ($known && !in_array($method, $allowed_methods)) {
+            header('Allow: ' . implode(', ', $allowed_methods));
+            err(405, 'method not allowed');
         }
     }
 
@@ -638,6 +705,7 @@ try {
 } catch (Throwable $e) {
     if (isset($db) && $db->inTransaction()) { $db->rollBack(); }
     error_log('InvoicePlaneAPI error: ' . $e->getMessage());
+    error_log('InvoicePlaneAPI trace: ' . $e->getTraceAsString());
     if (str_starts_with($e->getMessage(), 'duplicate invoice number')
         || str_contains($e->getMessage(), '1062 Duplicate entry')) {
         err(409, 'conflict: invoice number already exists');
