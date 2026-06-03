@@ -262,26 +262,36 @@ function recompute_invoice(PDO $db, int $invoice_id): void {
 }
 
 function generate_invoice_number(PDO $db, int $group_id, string $date): string {
-    $s = $db->prepare('SELECT invoice_group_identifier_format, invoice_group_next_id, invoice_group_left_pad FROM ip_invoice_groups WHERE invoice_group_id=? FOR UPDATE');
-    $s->execute([$group_id]);
-    $g = $s->fetch();
-    if (!$g) throw new RuntimeException('invoice group not found');
-    $padded = str_pad((string) (int) $g['invoice_group_next_id'], (int) $g['invoice_group_left_pad'], '0', STR_PAD_LEFT);
-    $dt = new DateTimeImmutable($date);
-    $number = strtr($g['invoice_group_identifier_format'], [
-        '{{{year}}}'  => $dt->format('Y'),
-        '{{{month}}}' => $dt->format('m'),
-        '{{{day}}}'   => $dt->format('d'),
-        '{{{id}}}'    => $padded,
-    ]);
-    $s = $db->prepare('SELECT COUNT(*) FROM ip_invoices WHERE invoice_number = ?');
-    $s->execute([$number]);
-    if ((int) $s->fetchColumn() > 0) {
-        throw new RuntimeException('duplicate invoice number: ' . $number);
+    $ownTxn = !$db->inTransaction();
+    if ($ownTxn) $db->beginTransaction();
+    try {
+        // Atomically increment the counter and retrieve the new value via LAST_INSERT_ID()
+        $s = $db->prepare('UPDATE ip_invoice_groups SET invoice_group_next_id = LAST_INSERT_ID(invoice_group_next_id + 1) WHERE invoice_group_id=?');
+        $s->execute([$group_id]);
+        if ($s->rowCount() === 0) throw new RuntimeException('invoice group not found');
+        $nextId = (int) $db->lastInsertId();
+
+        // Read group format and padding after the atomic increment
+        $s = $db->prepare('SELECT invoice_group_identifier_format, invoice_group_left_pad FROM ip_invoice_groups WHERE invoice_group_id=?');
+        $s->execute([$group_id]);
+        $g = $s->fetch();
+        if (!$g) throw new RuntimeException('invoice group not found');
+
+        $padded = str_pad((string) $nextId, (int) $g['invoice_group_left_pad'], '0', STR_PAD_LEFT);
+        $dt = new DateTimeImmutable($date);
+        $number = strtr($g['invoice_group_identifier_format'], [
+            '{{{year}}}'  => $dt->format('Y'),
+            '{{{month}}}' => $dt->format('m'),
+            '{{{day}}}'   => $dt->format('d'),
+            '{{{id}}}'    => $padded,
+        ]);
+
+        if ($ownTxn) $db->commit();
+        return $number;
+    } catch (Throwable $e) {
+        if ($ownTxn) $db->rollBack();
+        throw $e;
     }
-    $s = $db->prepare('UPDATE ip_invoice_groups SET invoice_group_next_id = invoice_group_next_id + 1 WHERE invoice_group_id=?');
-    $s->execute([$group_id]);
-    return $number;
 }
 
 function fetch_invoice(PDO $db, int $id): ?array {

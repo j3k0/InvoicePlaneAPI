@@ -53,7 +53,7 @@ CREATE TABLE IF NOT EXISTS ip_invoices (
     invoice_date_due DATE NOT NULL,
     invoice_date_modified DATETIME NOT NULL,
     invoice_time_created TIME NOT NULL DEFAULT '00:00:00',
-    invoice_number VARCHAR(100) NULL,
+    invoice_number VARCHAR(100) NULL UNIQUE,
     invoice_terms LONGTEXT NOT NULL,
     invoice_url_key CHAR(32) NOT NULL,
     payment_method INT NOT NULL DEFAULT '0',
