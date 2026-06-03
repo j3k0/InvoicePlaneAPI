@@ -9,7 +9,7 @@ CREATE TABLE IF NOT EXISTS ip_users (
     user_type VARCHAR(255) NOT NULL DEFAULT '1',
     user_active INT(1) NOT NULL DEFAULT '1',
     PRIMARY KEY (user_id)
-) ENGINE=MyISAM DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
 CREATE TABLE IF NOT EXISTS ip_clients (
     client_id INT(11) NOT NULL AUTO_INCREMENT,
@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS ip_clients (
     client_email TEXT,
     client_active INT(1) NOT NULL DEFAULT '1',
     PRIMARY KEY (client_id)
-) ENGINE=MyISAM DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
 CREATE TABLE IF NOT EXISTS ip_invoice_groups (
     invoice_group_id INT(11) NOT NULL AUTO_INCREMENT,
@@ -32,14 +32,14 @@ CREATE TABLE IF NOT EXISTS ip_invoice_groups (
     invoice_group_next_id INT(11) NOT NULL,
     invoice_group_left_pad INT(2) NOT NULL DEFAULT '0',
     PRIMARY KEY (invoice_group_id)
-) ENGINE=MyISAM DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
 CREATE TABLE IF NOT EXISTS ip_tax_rates (
     tax_rate_id INT(11) NOT NULL AUTO_INCREMENT,
     tax_rate_name VARCHAR(255) NOT NULL,
     tax_rate_percent DECIMAL(10,2) NOT NULL,
     PRIMARY KEY (tax_rate_id)
-) ENGINE=MyISAM DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
 CREATE TABLE IF NOT EXISTS ip_invoices (
     invoice_id INT(11) NOT NULL AUTO_INCREMENT,
@@ -61,7 +61,7 @@ CREATE TABLE IF NOT EXISTS ip_invoices (
     invoice_discount_amount DECIMAL(20,2) NULL,
     invoice_discount_percent DECIMAL(20,2) NULL,
     PRIMARY KEY (invoice_id)
-) ENGINE=MyISAM DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
 CREATE TABLE IF NOT EXISTS ip_invoice_items (
     item_id INT(11) NOT NULL AUTO_INCREMENT,
@@ -81,7 +81,7 @@ CREATE TABLE IF NOT EXISTS ip_invoice_items (
     item_product_unit_id INT(11) NULL,
     item_date DATE NULL,
     PRIMARY KEY (item_id)
-) ENGINE=MyISAM DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
 CREATE TABLE IF NOT EXISTS ip_invoice_item_amounts (
     item_amount_id INT(11) NOT NULL AUTO_INCREMENT,
@@ -91,7 +91,7 @@ CREATE TABLE IF NOT EXISTS ip_invoice_item_amounts (
     item_discount DECIMAL(20,2) NULL,
     item_total DECIMAL(20,2) NOT NULL,
     PRIMARY KEY (item_amount_id)
-) ENGINE=MyISAM DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
 CREATE TABLE IF NOT EXISTS ip_invoice_amounts (
     invoice_amount_id INT(11) NOT NULL AUTO_INCREMENT,
@@ -104,7 +104,7 @@ CREATE TABLE IF NOT EXISTS ip_invoice_amounts (
     invoice_paid DECIMAL(20,2) DEFAULT '0.00',
     invoice_balance DECIMAL(20,2) DEFAULT '0.00',
     PRIMARY KEY (invoice_amount_id)
-) ENGINE=MyISAM DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
 INSERT INTO ip_users (user_id, user_email, user_name, user_password, user_type) VALUES
 (1, 'admin@example.com', 'Admin', '$2y$10$invalidhashforseedonly', '1');

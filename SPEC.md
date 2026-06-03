@@ -252,7 +252,7 @@ No auth required. **Response (200):**
 
 ## Verified Database Schema
 
-Source: `application/modules/setup/sql/` migration files (44 files, v1.0.0 to v1.7.2). Engine: MyISAM, charset: utf8. No FK constraints (MyISAM doesn't support them).
+Source: `application/modules/setup/sql/` migration files (44 files, v1.0.0 to v1.7.2). Engine: InnoDB (converted from InvoicePlane's default MyISAM to support transactions). Charset: utf8. No FK constraints (InnoDB supports them but InvoicePlane's schema doesn't define them).
 
 ### `ip_invoices`
 

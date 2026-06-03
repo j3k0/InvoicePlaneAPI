@@ -26,6 +26,18 @@ function jr($data, int $status = 200): void {
 }
 
 function err(int $status, string $message): void {
+    static $rollingBack = false;
+    if (!$rollingBack) {
+        $rollingBack = true;
+        try {
+            $pdo = db();
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+        } catch (Throwable $e) {
+            // If db() is not available or rollback fails, just proceed with error
+        }
+    }
     jr(['error' => $message], $status);
 }
 
@@ -250,7 +262,7 @@ function recompute_invoice(PDO $db, int $invoice_id): void {
 }
 
 function generate_invoice_number(PDO $db, int $group_id, string $date): string {
-    $s = $db->prepare('SELECT invoice_group_identifier_format, invoice_group_next_id, invoice_group_left_pad FROM ip_invoice_groups WHERE invoice_group_id=?');
+    $s = $db->prepare('SELECT invoice_group_identifier_format, invoice_group_next_id, invoice_group_left_pad FROM ip_invoice_groups WHERE invoice_group_id=? FOR UPDATE');
     $s->execute([$group_id]);
     $g = $s->fetch();
     if (!$g) throw new RuntimeException('invoice group not found');
@@ -411,6 +423,19 @@ try {
             jr($inv);
         }
 
+        // ─── Transactional Safety ──────────────────────────────────────
+        // All mutation endpoints (PATCH, copy, status) wrap their writes
+        // in DB transactions to prevent data corruption from partial
+        // failures (e.g. items updated but totals not recomputed).
+        //
+        // FOR UPDATE row locks on the invoice SELECT serialize concurrent
+        // requests on the same invoice — two PATCHes cannot interleave.
+        //
+        // Because err() calls exit(), explicit $db->rollBack() is needed
+        // before every direct err() call inside the transaction. The err()
+        // function itself also auto-rolls-back any open transaction as a
+        // safety net for err() calls deep in validation functions.
+        // ───────────────────────────────────────────────────────────────
         if (count($parts) === 3 && $method === 'PATCH') {
             $body = body_json();
             validate_items_array($body['items'] ?? null);
@@ -481,6 +506,8 @@ try {
                 $date     = $body['date']     ?? date('Y-m-d');
                 $due_date = $body['due_date'] ?? date('Y-m-d', strtotime("$date +30 days"));
                 if ($due_date < $date) { $db->rollBack(); err(400, 'due_date must be on or after date'); }
+                // Generate number inside transaction: counter increment
+                // rolls back on copy failure, preventing sequence gaps.
                 $number   = generate_invoice_number($db, (int) $orig['invoice_group_id'], $date);
                 $url_key  = bin2hex(random_bytes(16));
 
@@ -560,6 +587,9 @@ try {
     }
 
     err(404, 'not found');
+// Safety net: roll back any transaction left open by an unexpected
+    // exception (e.g. PDOException mid-operation). Normal error paths
+    // roll back explicitly before calling err().
 } catch (Throwable $e) {
     if (isset($db) && $db->inTransaction()) { $db->rollBack(); }
     error_log('InvoicePlaneAPI error: ' . $e->getMessage());
