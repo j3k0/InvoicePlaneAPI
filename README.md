@@ -2,7 +2,7 @@
 
 A thin standalone REST API for [InvoicePlane](https://github.com/InvoicePlane/InvoicePlane) — programmatic access to invoices without browser automation or CSV exports.
 
-Single file, zero dependencies, ~200 lines of PHP with PDO.
+Single file, zero dependencies, ~380 lines of PHP with PDO.
 
 ## Motivation
 
@@ -32,6 +32,8 @@ Then add the Nginx location block (see below).
 | `INVOICEPLANE_DB_NAME` | Database name (e.g., `invoiceplane_db`) |
 | `INVOICEPLANE_DB_USER` | Database user |
 | `INVOICEPLANE_DB_PASS` | Database password |
+| `INVOICEPLANE_BASE_URL` | Base URL for guest invoice URLs (e.g., `https://invoices.example.com`) |
+| `INVOICEPLANE_CURRENCY` | Currency code for list view (default `EUR`) |
 
 ## Authentication
 
@@ -80,7 +82,7 @@ Add the Nginx block above to your nginx config, and the env vars via `environmen
 Base URL: `https://your-domain/api/v1`
 
 ### `GET /api/v1/health`
-No auth. Returns `{"status":"ok","db":"connected"}`.
+No auth. Returns `{"ok":true}`. Returns `{"ok":false}` with 503 on DB failure.
 
 ### `GET /api/v1/invoices`
 List/filter invoices.
@@ -132,8 +134,20 @@ See [SPEC.md](SPEC.md) for the complete API specification with verified database
 
 - Timing-safe API key comparison (`hash_equals`)
 - PDO prepared statements for all queries — no SQL injection
-- `X-Content-Type-Options: nosniff` on all responses
-- Health endpoint is the only unauthenticated route
+- `X-Content-Type-Options: nosniff`, `Strict-Transport-Security`, `Cache-Control`, `Referrer-Policy` on all responses
+- Audit logging of authentication failures and data mutations
+- Minimum API key length warning (< 32 characters)
+- LIKE wildcards (`%`, `_`) are escaped in search queries
+- Health endpoint is the only unauthenticated route (returns minimal info)
+- `Content-Type: application/json` required for mutation requests
+- Empty PATCH bodies rejected with 400
+- Wrong HTTP methods on valid paths return 405 with `Allow` header
+
+## Known Limitations
+
+- **No authorization scoping:** All authenticated clients share the same API key and can access any invoice by sequential ID. For multi-tenant deployments, deploy separate instances or add a reverse-proxy layer with per-key scoping.
+- **No CORS headers:** The API intentionally does not set `Access-Control-Allow-Origin`. It is designed for server-to-server communication. If browser-based clients are needed, add appropriate CORS headers at the reverse proxy level.
+- **Discount/tax model:** Discount amounts are subtracted before tax is calculated (i.e., the discount reduces the tax basis). This is VAT-compliant for most EU jurisdictions but may not be correct in all regions. Verify local tax rules before relying on the computed totals.
 
 ## License
 

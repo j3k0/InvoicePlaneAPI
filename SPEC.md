@@ -245,8 +245,15 @@ No auth required. **Response (200):**
 
 ```json
 {
-  "status": "ok",
-  "db": "connected"
+  "ok": true
+}
+```
+
+**Error response (503):**
+
+```json
+{
+  "ok": false
 }
 ```
 

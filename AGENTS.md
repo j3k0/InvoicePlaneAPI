@@ -14,6 +14,15 @@ Single-file PHP REST API (~379 lines) for InvoicePlane. No framework, no depende
 - Invoice statuses are hardcoded constants (1=draft, 2=sent, 3=viewed, 4=paid), not in the database
 - `str_starts_with()` on line 375 requires PHP 8.0+ — will fatal error on PHP 7.x
 - Invoice number generation atomically increments `ip_invoice_groups.invoice_group_next_id` and expands `{{{year}}}`, `{{{month}}}`, `{{{day}}}`, `{{{id}}}` tokens from the group format
+- Security headers (HSTS, Cache-Control, Referrer-Policy) are set on every response
+- Health endpoint now returns `{"ok": true}` (no longer leaks DB status)
+- Audit logging goes to PHP error log with `InvoicePlaneAPI audit:` prefix
+- LIKE wildcards `%` and `_` in search queries are escaped to prevent injection
+- API keys shorter than 32 characters trigger a warning
+- Mutation endpoints require `Content-Type: application/json` (return 415 if missing)
+- Empty PATCH `{}` body returns 400
+- Wrong HTTP methods on valid paths return 405 with Allow header
+- Rate limiting is done at the nginx level (not in api.php)
 
 ## Docker Image Quirks (jeko/invoiceplane:1.7.1-1)
 
