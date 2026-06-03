@@ -226,9 +226,9 @@ function validate_item_fields(array $item, ?PDO $db = null, ?array $db_row = nul
     }
 }
 
-function recompute_item(PDO $db, int $item_id): void {
-    $s = $db->prepare('SELECT item_quantity, item_price, item_discount_amount, item_tax_rate_id FROM ip_invoice_items WHERE item_id = ?');
-    $s->execute([$item_id]);
+function recompute_item(PDO $db, int $item_id, int $invoice_id): void {
+    $s = $db->prepare('SELECT item_quantity, item_price, item_discount_amount, item_tax_rate_id FROM ip_invoice_items WHERE item_id = ? AND invoice_id = ?');
+    $s->execute([$item_id, $invoice_id]);
     $i = $s->fetch();
     if (!$i) return;
     $discount = (float) ($i['item_discount_amount'] ?? 0);
@@ -488,7 +488,7 @@ try {
                         $iargs[] = $id;
                         $s = $db->prepare('UPDATE ip_invoice_items SET ' . implode(',', $iup) . ' WHERE item_id=? AND invoice_id=?');
                         $s->execute($iargs);
-                        recompute_item($db, $iid);
+                        recompute_item($db, $iid, $id);
                     }
                 }
                 recompute_invoice($db, $id);
@@ -561,7 +561,7 @@ try {
                         $it['item_product_unit_id'],
                         isset($ov['item_date']) ? $ov['item_date'] : $it['item_date'],
                     ]);
-                    recompute_item($db, (int) $db->lastInsertId());
+                    recompute_item($db, (int) $db->lastInsertId(), $new_id);
                 }
                 recompute_invoice($db, $new_id);
                 $db->commit();
@@ -603,8 +603,9 @@ try {
 } catch (Throwable $e) {
     if (isset($db) && $db->inTransaction()) { $db->rollBack(); }
     error_log('InvoicePlaneAPI error: ' . $e->getMessage());
-    if (str_starts_with($e->getMessage(), 'duplicate invoice number')) {
-        err(409, $e->getMessage());
+    if (str_starts_with($e->getMessage(), 'duplicate invoice number')
+        || str_contains($e->getMessage(), '1062 Duplicate entry')) {
+        err(409, 'conflict: invoice number already exists');
     }
     err(500, 'internal error');
 }
