@@ -66,9 +66,19 @@ function db(): PDO {
 }
 
 function body_json(): array {
-    $raw = file_get_contents('php://input');
-    if ($raw === '' || $raw === false) return [];
-    $d = json_decode($raw, true);
+    $maxBytes = 1_048_576; // 1MB
+    $contentLength = (int) ($_SERVER['CONTENT_LENGTH'] ?? 0);
+    if ($contentLength > $maxBytes) {
+        err(413, 'payload too large');
+    }
+
+    $raw = file_get_contents('php://input', false, null, 0, $maxBytes + 1);
+    if ($raw === false || $raw === '') return [];
+    if (strlen($raw) > $maxBytes) {
+        err(413, 'payload too large');
+    }
+
+    $d = json_decode($raw, true, 512, JSON_BIGINT_AS_STRING);
     if (!is_array($d)) err(400, 'invalid json body');
     return $d;
 }
@@ -585,6 +595,31 @@ try {
                 if (!$row) { $db->rollBack(); err(404, 'invoice not found'); }
                 $cur = (int) $row['invoice_status_id'];
                 if ($new < $cur) { $db->rollBack(); err(409, 'cannot transition backwards'); }
+
+                // Enforce sequential status transitions: draft→sent→viewed→paid only
+                $allowed = match ($cur) {
+                    1 => [2],  // draft → sent
+                    2 => [3],  // sent → viewed
+                    3 => [4],  // viewed → paid
+                    4 => [],   // paid is terminal
+                    default => [],
+                };
+                if (!in_array($new, $allowed, true)) {
+                    $db->rollBack();
+                    err(409, 'invalid transition from ' . (STATUS_NAMES[$cur] ?? 'unknown') . ' to ' . $name);
+                }
+
+                // Verify balance before marking as paid
+                if ($new === 4) {
+                    $s = $db->prepare('SELECT invoice_balance FROM ip_invoice_amounts WHERE invoice_id=?');
+                    $s->execute([$id]);
+                    $amt = $s->fetch();
+                    if ($amt && (float) $amt['invoice_balance'] > 0.01) {
+                        $db->rollBack();
+                        err(409, 'invoice has outstanding balance');
+                    }
+                }
+
                 $s = $db->prepare('UPDATE ip_invoices SET invoice_status_id=?, is_read_only=?, invoice_date_modified=NOW() WHERE invoice_id=?');
                 $s->execute([$new, $new > 1 ? 1 : 0, $id]);
                 $db->commit();

@@ -198,6 +198,46 @@ test_patch_draft_item() {
     fi
 }
 
+test_status_draft_to_paid_skip() {
+    local status
+    status=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" -d '{"status":"paid"}' "$BASE_URL/api/v1/invoices/1/status")
+    if [ "$status" = "409" ]; then
+        pass "Draft→paid skip returns 409"
+    else
+        fail "Draft→paid skip (expected 409, got $status)"
+    fi
+}
+
+test_status_sent_to_paid_skip() {
+    local status
+    status=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" -d '{"status":"paid"}' "$BASE_URL/api/v1/invoices/2/status")
+    if [ "$status" = "409" ]; then
+        pass "Sent→paid skip returns 409"
+    else
+        fail "Sent→paid skip (expected 409, got $status)"
+    fi
+}
+
+test_status_viewed_to_paid_with_balance() {
+    # First transition invoice 2 (sent) to viewed
+    local body1
+    body1=$(curl -sf -X POST -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" -d '{"status":"viewed"}' "$BASE_URL/api/v1/invoices/2/status")
+    if ! echo "$body1" | jq -e '.status == "viewed"' > /dev/null 2>&1; then
+        fail "Pre-condition: sent→viewed (body: $(echo "$body1" | head -c 200))"
+        return
+    fi
+    pass "Transition sent to viewed"
+
+    # Now try to mark as paid - should fail due to balance (1467.00)
+    local status
+    status=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" -d '{"status":"paid"}' "$BASE_URL/api/v1/invoices/2/status")
+    if [ "$status" = "409" ]; then
+        pass "Viewed invoice with balance cannot be marked paid (409)"
+    else
+        fail "Viewed→paid with balance (expected 409, got $status)"
+    fi
+}
+
 test_status_draft_to_sent() {
     local body
     body=$(curl -sf -X POST -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" -d '{"status":"sent"}' "$BASE_URL/api/v1/invoices/1/status")
@@ -449,6 +489,66 @@ test_env_secret_http_prefix_header_injection() {
     fi
 }
 
+test_guest_url_present() {
+    local body
+    body=$(curl -sf -H "Authorization: Bearer $API_KEY" "$BASE_URL/api/v1/invoices/2")
+    if echo "$body" | jq -e '.guest_url | startswith("http://localhost:10080/index.php/guest/view/invoice/")' > /dev/null 2>&1; then
+        pass "guest_url present and uses configured INVOICEPLANE_BASE_URL"
+    else
+        fail "guest_url (body: $(echo "$body" | head -c 200))"
+    fi
+}
+
+test_guest_url_host_header_injection() {
+    # Malicious Host header must not affect guest_url
+    local body
+    body=$(curl -sf -H "Authorization: Bearer $API_KEY" -H "Host: evil.com" "$BASE_URL/api/v1/invoices/2")
+    if echo "$body" | jq -e '.guest_url | startswith("http://localhost:10080/index.php/guest/view/invoice/")' > /dev/null 2>&1; then
+        pass "guest_url immune to Host header injection"
+    else
+        fail "guest_url uses Host header or is missing (body: $(echo "$body" | head -c 200))"
+    fi
+}
+
+test_body_too_large_content_length() {
+    # Content-Length header > 1MB must be rejected immediately
+    local status
+    status=$(curl -s -o /dev/null -w '%{http_code}' -X PATCH \
+        -H "Authorization: Bearer $API_KEY" \
+        -H "Content-Type: application/json" \
+        -H "Content-Length: 2000000" \
+        --data '{}' \
+        "$BASE_URL/api/v1/invoices/1")
+    if [ "$status" = "413" ]; then
+        pass "Body size: Content-Length > 1MB returns 413"
+    else
+        fail "Body size: Content-Length > 1MB (expected 413, got $status)"
+    fi
+}
+
+test_body_too_large_actual() {
+    # Actual body > 1MB (spoofed or no Content-Length) must be rejected
+    local status
+    # Generate a payload > 1MB using python, send via curl
+    local tmpfile
+    tmpfile=$(mktemp)
+    python3 -c "
+import sys
+sys.stdout.write('x' * 1500000)
+" > "$tmpfile"
+    status=$(curl -s -o /dev/null -w '%{http_code}' -X PATCH \
+        -H "Authorization: Bearer $API_KEY" \
+        -H "Content-Type: application/json" \
+        --data-binary "@$tmpfile" \
+        "$BASE_URL/api/v1/invoices/1")
+    rm -f "$tmpfile"
+    if [ "$status" = "413" ]; then
+        pass "Body size: actual body > 1MB returns 413"
+    else
+        fail "Body size: actual body > 1MB (expected 413, got $status)"
+    fi
+}
+
 # --- Runner ---
 
 cmd_run() {
@@ -462,6 +562,8 @@ cmd_run() {
     test_auth_wrong_key
     test_env_secret_header_injection
     test_env_secret_http_prefix_header_injection
+    test_guest_url_present
+    test_guest_url_host_header_injection
     test_list_invoices_default
     test_list_all_statuses
     test_filter_status_paid
@@ -488,6 +590,11 @@ cmd_run() {
     test_patch_items_not_array
     test_patch_valid_zero_quantity
     test_patch_valid_tax_rate_id_zero
+    test_body_too_large_content_length
+    test_body_too_large_actual
+    test_status_draft_to_paid_skip
+    test_status_sent_to_paid_skip
+    test_status_viewed_to_paid_with_balance
     test_status_draft_to_sent
     test_status_backwards
     test_patch_non_draft
