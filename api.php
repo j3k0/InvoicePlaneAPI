@@ -266,9 +266,12 @@ function recompute_invoice(PDO $db, int $invoice_id): void {
     $s = $db->prepare('SELECT COALESCE(SUM(ia.item_subtotal),0) AS sub, COALESCE(SUM(ia.item_tax_total),0) AS tax FROM ip_invoice_item_amounts ia JOIN ip_invoice_items ii ON ia.item_id=ii.item_id WHERE ii.invoice_id=?');
     $s->execute([$invoice_id]);
     $r = $s->fetch();
-    $s = $db->prepare('UPDATE ip_invoice_amounts SET invoice_item_subtotal=?, invoice_item_tax_total=?, invoice_total = ? + ? + invoice_tax_total, invoice_balance = (? + ? + invoice_tax_total) - invoice_paid WHERE invoice_id=?');
-    $sub = (float) $r['sub']; $tax = (float) $r['tax'];
-    $s->execute([$sub, $tax, $sub, $tax, $sub, $tax, $invoice_id]);
+    $s = $db->prepare('SELECT COALESCE(SUM(invoice_tax_rate_amount),0) AS invoice_tax FROM ip_invoice_tax_rates WHERE invoice_id=?');
+    $s->execute([$invoice_id]);
+    $tr = $s->fetch();
+    $s = $db->prepare('UPDATE ip_invoice_amounts SET invoice_item_subtotal=?, invoice_item_tax_total=?, invoice_tax_total=?, invoice_total = ? + ? + ?, invoice_balance = (? + ? + ?) - invoice_paid WHERE invoice_id=?');
+    $sub = (float) $r['sub']; $tax = (float) $r['tax']; $invTax = (float) $tr['invoice_tax'];
+    $s->execute([$sub, $tax, $invTax, $sub, $tax, $invTax, $sub, $tax, $invTax, $invoice_id]);
 }
 
 function generate_invoice_number(PDO $db, int $group_id, string $date): string {
@@ -531,8 +534,8 @@ try {
                 $number   = generate_invoice_number($db, (int) $orig['invoice_group_id'], $date);
                 $url_key  = bin2hex(random_bytes(16));
 
-                $s = $db->prepare('INSERT INTO ip_invoices (user_id, client_id, invoice_group_id, invoice_status_id, invoice_date_created, invoice_date_due, invoice_date_modified, invoice_number, invoice_terms, invoice_url_key, payment_method) VALUES (?, ?, ?, 1, ?, ?, NOW(), ?, ?, ?, ?)');
-                $s->execute([$orig['user_id'], $orig['client_id'], $orig['invoice_group_id'], $date, $due_date, $number, $orig['invoice_terms'] ?? '', $url_key, $orig['payment_method'] ?? 0]);
+                $s = $db->prepare('INSERT INTO ip_invoices (user_id, client_id, invoice_group_id, invoice_status_id, invoice_date_created, invoice_date_due, invoice_date_modified, invoice_number, invoice_terms, invoice_url_key, payment_method, invoice_discount_amount, invoice_discount_percent) VALUES (?, ?, ?, 1, ?, ?, NOW(), ?, ?, ?, ?, ?, ?)');
+                $s->execute([$orig['user_id'], $orig['client_id'], $orig['invoice_group_id'], $date, $due_date, $number, $orig['invoice_terms'] ?? '', $url_key, $orig['payment_method'] ?? 0, $orig['invoice_discount_amount'] ?? 0, $orig['invoice_discount_percent'] ?? 0]);
                 $new_id = (int) $db->lastInsertId();
 
                 $items = $db->prepare('SELECT * FROM ip_invoice_items WHERE invoice_id=? ORDER BY item_order, item_id');
@@ -572,6 +575,16 @@ try {
                         isset($ov['item_date']) ? $ov['item_date'] : $it['item_date'],
                     ]);
                     recompute_item($db, (int) $db->lastInsertId(), $new_id);
+                }
+                // Clone invoice-level tax rates
+                $taxRates = $db->prepare('SELECT tax_rate_id, include_item_tax, invoice_tax_rate_amount FROM ip_invoice_tax_rates WHERE invoice_id=?');
+                $taxRates->execute([$id]);
+                $origTaxRates = $taxRates->fetchAll();
+                if ($origTaxRates) {
+                    $insTax = $db->prepare('INSERT INTO ip_invoice_tax_rates (invoice_id, tax_rate_id, include_item_tax, invoice_tax_rate_amount) VALUES (?, ?, ?, ?)');
+                    foreach ($origTaxRates as $tr) {
+                        $insTax->execute([$new_id, $tr['tax_rate_id'], $tr['include_item_tax'], $tr['invoice_tax_rate_amount']]);
+                    }
                 }
                 recompute_invoice($db, $new_id);
                 $db->commit();

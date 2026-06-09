@@ -91,8 +91,8 @@ test_list_invoices_default() {
 test_list_all_statuses() {
     local body
     body=$(curl -sf -H "Authorization: Bearer $API_KEY" "$BASE_URL/api/v1/invoices?status=all")
-    if echo "$body" | jq -e '.total == 3' > /dev/null 2>&1; then
-        pass "List invoices status=all returns 3"
+    if echo "$body" | jq -e '.total == 4' > /dev/null 2>&1; then
+        pass "List invoices status=all returns 4"
     else
         fail "List all statuses (body: $(echo "$body" | head -c 200))"
     fi
@@ -438,6 +438,38 @@ test_copy_items_not_array() {
     fi
 }
 
+test_copy_preserves_invoice_tax_rates() {
+    # Copy invoice 2 (which has 100.00 invoice-level tax in the new seed)
+    local body
+    body=$(curl -sf -X POST -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" -d '{}' "$BASE_URL/api/v1/invoices/2/copy")
+    local new_id
+    new_id=$(echo "$body" | jq -r '.id')
+    if [ -z "$new_id" ] || [ "$new_id" = "null" ]; then
+        fail "Copy invoice 2 for tax-rate test: $body"
+        return
+    fi
+    local detail
+    detail=$(curl -sf -H "Authorization: Bearer $API_KEY" "$BASE_URL/api/v1/invoices/$new_id")
+    if echo "$detail" | jq -e '.amounts.total == 1567' > /dev/null 2>&1; then
+        pass "Copy preserves invoice-level tax rates (total = 1567)"
+    else
+        fail "Copy tax rates (body: $(echo "$detail" | head -c 200))"
+    fi
+}
+
+test_copy_preserves_global_discount() {
+    # Copy invoice 4 (which has global discount 50.00 / 10.00% in the new seed)
+    local body
+    body=$(curl -sf -X POST -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" -d '{}' "$BASE_URL/api/v1/invoices/4/copy")
+    local new_id
+    new_id=$(echo "$body" | jq -r '.id')
+    if [ -z "$new_id" ] || [ "$new_id" = "null" ]; then
+        fail "Copy invoice 4 for global-discount test: $body"
+        return
+    fi
+    pass "Copy invoice 4 with global discount"
+}
+
 test_patch_valid_zero_quantity() {
     local body
     body=$(curl -sf -X PATCH -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" -d '{"items":[{"item_id":1,"quantity":0}]}' "$BASE_URL/api/v1/invoices/1")
@@ -603,6 +635,8 @@ cmd_run() {
     test_copy_unknown_item_id
     test_copy_negative_quantity
     test_copy_items_not_array
+    test_copy_preserves_invoice_tax_rates
+    test_copy_preserves_global_discount
 
     echo ""
     echo "============================"

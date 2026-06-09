@@ -106,6 +106,15 @@ CREATE TABLE IF NOT EXISTS ip_invoice_amounts (
     PRIMARY KEY (invoice_amount_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
+CREATE TABLE IF NOT EXISTS ip_invoice_tax_rates (
+    invoice_tax_rate_id INT(11) NOT NULL AUTO_INCREMENT,
+    invoice_id INT(11) NOT NULL,
+    tax_rate_id INT(11) NOT NULL,
+    include_item_tax TINYINT(1) NOT NULL DEFAULT '0',
+    invoice_tax_rate_amount DECIMAL(20,2) NOT NULL DEFAULT '0.00',
+    PRIMARY KEY (invoice_tax_rate_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+
 INSERT INTO ip_users (user_id, user_email, user_name, user_password, user_type) VALUES
 (1, 'admin@example.com', 'Admin', '$2y$10$invalidhashforseedonly', '1');
 
@@ -120,26 +129,33 @@ INSERT INTO ip_tax_rates (tax_rate_id, tax_rate_name, tax_rate_percent) VALUES
 (1, 'None', 0.00),
 (2, 'VAT 21%', 21.00);
 
-INSERT INTO ip_invoices (invoice_id, user_id, client_id, invoice_group_id, invoice_status_id, is_read_only, invoice_date_created, invoice_date_due, invoice_date_modified, invoice_number, invoice_terms, invoice_url_key, payment_method) VALUES
-(1, 1, 1, 1, 1, 0, '2026-05-01', '2026-05-31', '2026-05-01 00:00:00', 'INV001', '', 'aaaaurlkey1111bbbburlkey2222', 0),
-(2, 1, 2, 1, 2, 1, '2026-04-15', '2026-05-15', '2026-04-15 00:00:00', 'INV002', '', 'ccccurlkey3333ddddurlkey4444', 0),
-(3, 1, 1, 1, 4, 1, '2026-03-10', '2026-04-10', '2026-03-10 00:00:00', 'INV003', '', 'eeeeurlkey5555ffffurlkey6666', 0);
+INSERT INTO ip_invoices (invoice_id, user_id, client_id, invoice_group_id, invoice_status_id, is_read_only, invoice_date_created, invoice_date_due, invoice_date_modified, invoice_number, invoice_terms, invoice_url_key, payment_method, invoice_password, invoice_discount_amount, invoice_discount_percent) VALUES
+(1, 1, 1, 1, 1, 0, '2026-05-01', '2026-05-31', '2026-05-01 00:00:00', 'INV001', '', 'aaaaurlkey1111bbbburlkey2222', 0, NULL, 0.00, 0.00),
+(2, 1, 2, 1, 2, 1, '2026-04-15', '2026-05-15', '2026-04-15 00:00:00', 'INV002', '', 'ccccurlkey3333ddddurlkey4444', 0, NULL, 0.00, 0.00),
+(3, 1, 1, 1, 4, 1, '2026-03-10', '2026-04-10', '2026-03-10 00:00:00', 'INV003', '', 'eeeeurlkey5555ffffurlkey6666', 0, NULL, 0.00, 0.00),
+(4, 1, 1, 1, 1, 0, '2026-02-01', '2026-03-01', '2026-02-01 00:00:00', 'INV004', '', 'ggggurlkey7777hhhhurlkey8888', 0, NULL, 50.00, 10.00);
 
 INSERT INTO ip_invoice_items (item_id, invoice_id, item_tax_rate_id, item_product_id, item_task_id, item_date_added, item_name, item_description, item_quantity, item_price, item_discount_amount, item_order, item_product_unit, item_date) VALUES
 (1, 1, 0, NULL, NULL, '2026-05-01', 'Website Hosting', '12 months of hosting at 50.00/month', 12.00000000, 50.00, 0.00, 0, 'month/months', NULL),
 (2, 1, 0, NULL, NULL, '2026-05-01', 'SSL Certificate', 'Annual SSL certificate', 1.00000000, 75.00, 0.00, 1, NULL, NULL),
 (3, 2, 2, NULL, NULL, '2026-04-15', 'Consulting Hours', '10 hours of consulting at 120.00/hour', 10.00000000, 120.00, 0.00, 0, 'hour/hours', NULL),
 (4, 2, 0, NULL, NULL, '2026-04-15', 'Domain Registration', '1 domain registration', 1.00000000, 15.00, 0.00, 1, NULL, NULL),
-(5, 3, 0, NULL, NULL, '2026-03-10', 'Annual Maintenance', 'Yearly maintenance contract', 1.00000000, 600.00, 0.00, 0, 'year/years', NULL);
+(5, 3, 0, NULL, NULL, '2026-03-10', 'Annual Maintenance', 'Yearly maintenance contract', 1.00000000, 600.00, 0.00, 0, 'year/years', NULL),
+(6, 4, 0, NULL, NULL, '2026-02-01', 'Setup Fee', 'One-time setup', 1.00000000, 200.00, 0.00, 0, NULL, NULL);
 
 INSERT INTO ip_invoice_item_amounts (item_amount_id, item_id, item_subtotal, item_tax_total, item_discount, item_total) VALUES
 (1, 1, 600.00, 0.00, 0.00, 600.00),
 (2, 2, 75.00, 0.00, 0.00, 75.00),
 (3, 3, 1200.00, 252.00, 0.00, 1452.00),
 (4, 4, 15.00, 0.00, 0.00, 15.00),
-(5, 5, 600.00, 0.00, 0.00, 600.00);
+(5, 5, 600.00, 0.00, 0.00, 600.00),
+(6, 6, 200.00, 0.00, 0.00, 200.00);
 
 INSERT INTO ip_invoice_amounts (invoice_amount_id, invoice_id, invoice_sign, invoice_item_subtotal, invoice_item_tax_total, invoice_tax_total, invoice_total, invoice_paid, invoice_balance) VALUES
 (1, 1, '1', 675.00, 0.00, 0.00, 675.00, 0.00, 675.00),
-(2, 2, '1', 1215.00, 252.00, 0.00, 1467.00, 0.00, 1467.00),
-(3, 3, '1', 600.00, 0.00, 0.00, 600.00, 600.00, 0.00);
+(2, 2, '1', 1215.00, 252.00, 100.00, 1567.00, 0.00, 1567.00),
+(3, 3, '1', 600.00, 0.00, 0.00, 600.00, 600.00, 0.00),
+(4, 4, '1', 200.00, 0.00, 0.00, 200.00, 0.00, 200.00);
+
+INSERT INTO ip_invoice_tax_rates (invoice_tax_rate_id, invoice_id, tax_rate_id, include_item_tax, invoice_tax_rate_amount) VALUES
+(1, 2, 2, 0, 100.00);
