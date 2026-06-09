@@ -317,7 +317,7 @@ function fetch_invoice(PDO $db, int $id): ?array {
     $items = $s->fetchAll();
     $s = $db->prepare('SELECT * FROM ip_invoice_amounts WHERE invoice_id=?');
     $s->execute([$id]);
-    $a = $s->fetch() ?: ['invoice_total' => 0, 'invoice_paid' => 0, 'invoice_balance' => 0];
+    $a = $s->fetch() ?: ['invoice_item_subtotal' => 0, 'invoice_item_tax_total' => 0, 'invoice_tax_total' => 0, 'invoice_total' => 0, 'invoice_paid' => 0, 'invoice_balance' => 0];
     $address = implode(', ', array_filter([
         trim(($inv['client_address_1'] ?? '') . ' ' . ($inv['client_address_2'] ?? '')),
         trim(($inv['client_city'] ?? '') . ' ' . ($inv['client_zip'] ?? '')),
@@ -331,8 +331,10 @@ function fetch_invoice(PDO $db, int $id): ?array {
         'date'         => $inv['invoice_date_created'],
         'due_date'     => $inv['invoice_date_due'],
         'status'       => STATUS_NAMES[(int) $inv['invoice_status_id']] ?? 'unknown',
-        'is_read_only' => (int) ($inv['is_read_only'] ?? 0),
-        'client'       => [
+        'is_read_only'    => (int) ($inv['is_read_only'] ?? 0),
+        'discount_amount' => (float) ($inv['invoice_discount_amount'] ?? 0),
+        'discount_percent'=> (float) ($inv['invoice_discount_percent'] ?? 0),
+        'client'           => [
             'id'      => (int) $inv['client_id'],
             'name'    => $inv['client_name'],
             'address' => $address,
@@ -353,9 +355,12 @@ function fetch_invoice(PDO $db, int $id): ?array {
             'item_order'  => (int) $it['item_order'],
         ], $items),
         'amounts' => [
-            'total'   => (float) $a['invoice_total'],
-            'paid'    => (float) $a['invoice_paid'],
-            'balance' => (float) $a['invoice_balance'],
+            'subtotal'         => (float) $a['invoice_item_subtotal'],
+            'tax_total'        => (float) $a['invoice_item_tax_total'],
+            'invoice_tax_total'=> (float) $a['invoice_tax_total'],
+            'total'            => (float) $a['invoice_total'],
+            'paid'             => (float) $a['invoice_paid'],
+            'balance'          => (float) $a['invoice_balance'],
         ],
         'guest_url' => $base ? $base . '/index.php/guest/view/invoice/' . $inv['invoice_url_key'] : null,
     ];

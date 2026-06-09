@@ -142,10 +142,15 @@ GET /api/v1/invoices/{id}
     }
   ],
   "amounts": {
+    "subtotal": 2013.60,
+    "tax_total": 421.20,
+    "invoice_tax_total": 0.00,
     "total": 2434.80,
     "paid": 2434.80,
     "balance": 0.00
   },
+  "discount_amount": 0.00,
+  "discount_percent": 0.00,
   "guest_url": "https://invoices-eur.fovea.cc/index.php/guest/view/invoice/NbgkO1RUrKCxe4SAnwyJ9DEqsil7Iju3"
 }
 ```

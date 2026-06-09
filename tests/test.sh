@@ -562,6 +562,39 @@ test_guest_url_host_header_injection() {
     fi
 }
 
+test_get_invoice_exposes_amounts_breakdown() {
+    # Invoice 2 has 1215 subtotal + 252 item tax + 100 invoice-level tax = 1567 total
+    local body
+    body=$(curl -sf -H "Authorization: Bearer $API_KEY" "$BASE_URL/api/v1/invoices/2")
+    if echo "$body" | jq -e '.amounts.subtotal == 1215 and .amounts.tax_total == 252 and .amounts.invoice_tax_total == 100 and .amounts.total == 1567' > /dev/null 2>&1; then
+        pass "GET single invoice exposes amounts.subtotal, tax_total, invoice_tax_total, total"
+    else
+        fail "Amounts breakdown (body: $(echo "$body" | head -c 200))"
+    fi
+}
+
+test_get_invoice_exposes_discount_fields() {
+    # Invoice 4 (draft) has invoice_discount_amount=50.00 and invoice_discount_percent=10.00
+    local body
+    body=$(curl -sf -H "Authorization: Bearer $API_KEY" "$BASE_URL/api/v1/invoices/4")
+    if echo "$body" | jq -e '.discount_amount == 50.00 and .discount_percent == 10.00' > /dev/null 2>&1; then
+        pass "GET single invoice exposes discount_amount and discount_percent"
+    else
+        fail "Discount fields (body: $(echo "$body" | head -c 200))"
+    fi
+}
+
+test_get_invoice_discount_defaults_to_zero() {
+    # Invoice 1 (draft) has no discount
+    local body
+    body=$(curl -sf -H "Authorization: Bearer $API_KEY" "$BASE_URL/api/v1/invoices/1")
+    if echo "$body" | jq -e '.discount_amount == 0 and .discount_percent == 0' > /dev/null 2>&1; then
+        pass "GET single invoice discount defaults to 0 when unset"
+    else
+        fail "Discount defaults (body: $(echo "$body" | head -c 200))"
+    fi
+}
+
 test_body_too_large_content_length() {
     # Content-Length header > 1MB must be rejected immediately
     local status
@@ -616,6 +649,9 @@ cmd_run() {
     test_env_secret_http_prefix_header_injection
     test_guest_url_present
     test_guest_url_host_header_injection
+    test_get_invoice_exposes_amounts_breakdown
+    test_get_invoice_exposes_discount_fields
+    test_get_invoice_discount_defaults_to_zero
     test_list_invoices_default
     test_list_all_statuses
     test_filter_status_paid
