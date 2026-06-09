@@ -155,7 +155,8 @@ INSERT INTO ip_invoice_amounts (invoice_amount_id, invoice_id, invoice_sign, inv
 (1, 1, '1', 675.00, 0.00, 0.00, 675.00, 0.00, 675.00),
 (2, 2, '1', 1215.00, 252.00, 100.00, 1567.00, 0.00, 1567.00),
 (3, 3, '1', 600.00, 0.00, 0.00, 600.00, 600.00, 0.00),
-(4, 4, '1', 200.00, 0.00, 0.00, 200.00, 0.00, 200.00);
+(4, 4, '1', 200.00, 0.00, 25.00, 225.00, 0.00, 225.00);
 
 INSERT INTO ip_invoice_tax_rates (invoice_tax_rate_id, invoice_id, tax_rate_id, include_item_tax, invoice_tax_rate_amount) VALUES
-(1, 2, 2, 0, 100.00);
+(1, 2, 2, 0, 100.00),
+(2, 4, 2, 0, 25.00);

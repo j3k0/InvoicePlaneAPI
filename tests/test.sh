@@ -228,7 +228,7 @@ test_status_viewed_to_paid_with_balance() {
     fi
     pass "Transition sent to viewed"
 
-    # Now try to mark as paid - should fail due to balance (1467.00)
+    # Now try to mark as paid - should fail due to balance (1567.00)
     local status
     status=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" -d '{"status":"paid"}' "$BASE_URL/api/v1/invoices/2/status")
     if [ "$status" = "409" ]; then
@@ -458,7 +458,7 @@ test_copy_preserves_invoice_tax_rates() {
 }
 
 test_copy_preserves_global_discount() {
-    # Copy invoice 4 (which has global discount 50.00 / 10.00% in the new seed)
+    # Copy invoice 4 (which has invoice_discount_amount=50.00 and invoice_discount_percent=10.00)
     local body
     body=$(curl -sf -X POST -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" -d '{}' "$BASE_URL/api/v1/invoices/4/copy")
     local new_id
@@ -467,7 +467,14 @@ test_copy_preserves_global_discount() {
         fail "Copy invoice 4 for global-discount test: $body"
         return
     fi
-    pass "Copy invoice 4 with global discount"
+    # Query the DB to confirm the discount fields were cloned (the API response does not expose them)
+    local discount
+    discount=$(docker exec -i invoiceplaneapi-mysql-1 mysql -uinvoiceplane -ppassword invoiceplane_db -BNe "SELECT CONCAT(COALESCE(invoice_discount_amount,'NULL'),'|',COALESCE(invoice_discount_percent,'NULL')) FROM ip_invoices WHERE invoice_id=$new_id" 2>/dev/null)
+    if [ "$discount" = "50.00|10.00" ]; then
+        pass "Copy preserves global discount (50.00/10.00%)"
+    else
+        fail "Copy global discount: expected 50.00|10.00, got $discount"
+    fi
 }
 
 test_patch_valid_zero_quantity() {
@@ -488,6 +495,19 @@ test_patch_valid_tax_rate_id_zero() {
         pass "PATCH valid tax_rate_id=0 accepted (no tax)"
     else
         fail "PATCH tax_rate_id=0 (status=$status body: $(echo "$body" | head -c 200))"
+    fi
+}
+
+test_patch_preserves_invoice_level_tax() {
+    # Invoice 4 is a draft with invoice-level tax of 25.00.
+    # PATCH should recompute and preserve the invoice-level tax in amounts.total.
+    # Expected: sub=200 + item_tax=0 + invoice_tax=25 = 225.
+    local body
+    body=$(curl -sf -X PATCH -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" -d '{"date":"2026-02-15"}' "$BASE_URL/api/v1/invoices/4")
+    if echo "$body" | jq -e '.amounts.total == 225' > /dev/null 2>&1; then
+        pass "PATCH preserves invoice-level tax (total = 225)"
+    else
+        fail "PATCH invoice-level tax (body: $(echo "$body" | head -c 200))"
     fi
 }
 
@@ -622,6 +642,7 @@ cmd_run() {
     test_patch_items_not_array
     test_patch_valid_zero_quantity
     test_patch_valid_tax_rate_id_zero
+    test_patch_preserves_invoice_level_tax
     test_body_too_large_content_length
     test_body_too_large_actual
     test_status_draft_to_paid_skip
